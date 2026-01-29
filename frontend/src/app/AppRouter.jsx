@@ -4,14 +4,14 @@ import ProtectedRoute from "./ProtectedRoute";
 import LoginPage from "../pages/auth/LoginPage";
 import DashboardLayout from "../layouts/DashboardLayout";
 import DashboardHome from "../pages/dashboard/DashboardHome";
-import CampusesPage from "../modules/masters/CampusesPage";
 
 import MastersLayout from "../modules/masters/MastersLayout";
+import CampusesPage from "../modules/masters/CampusesPage";
 import AcademicYearsPage from "../modules/masters/AcademicYearsPage";
 import FacultiesPage from "../modules/masters/FacultiesPage";
 import SectionsPage from "../modules/masters/SectionsPage";
 
-
+import StudentsPage from "../modules/students/StudentsPage";
 
 export default function AppRouter() {
   return (
@@ -28,6 +28,7 @@ export default function AppRouter() {
       >
         <Route index element={<DashboardHome />} />
 
+        {/* Masters (nested tabs) */}
         <Route path="masters" element={<MastersLayout />}>
           <Route index element={<Navigate to="/masters/campuses" replace />} />
           <Route path="campuses" element={<CampusesPage />} />
@@ -36,7 +37,10 @@ export default function AppRouter() {
           <Route path="sections" element={<SectionsPage />} />
         </Route>
 
-        <Route path="students" element={<div>Students (next)</div>} />
+        {/* Students (top-level route) */}
+        <Route path="students" element={<StudentsPage />} />
+
+        {/* Next modules */}
         <Route path="exams" element={<div>Exams (next)</div>} />
         <Route path="marks" element={<div>Marks Entry (next)</div>} />
         <Route path="reports" element={<div>Reports (next)</div>} />
