@@ -16,9 +16,12 @@ export const MENUS = {
     { label: "Students", path: "/students", icon: Users },
     { label: "Exams", path: "/exams", icon: ClipboardList },
     { label: "Marks Entry", path: "/marks", icon: PencilRuler },
+    { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
     { label: "Reports", path: "/reports", icon: BarChart3 },
     { label: "Corrections", path: "/corrections", icon: BadgeCheck },
     { label: "Public Portal", path: "/public", icon: Globe },
+    // { label: "Marks New", path: "/marks/student", icon: PencilRuler },
+    
   ],
   ADMIN: [
     { label: "Dashboard", path: "/", icon: LayoutDashboard },

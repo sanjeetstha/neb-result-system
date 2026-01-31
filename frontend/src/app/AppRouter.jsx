@@ -13,6 +13,14 @@ import SectionsPage from "../modules/masters/SectionsPage";
 
 import StudentsPage from "../modules/students/StudentsPage";
 
+import ExamsPage from "../modules/exams/ExamsPage";
+import ExamComponentsPage from "../modules/exams/ExamComponentsPage";
+import MarksEntryPage from "../modules/marks/MarksEntryPage";
+import MarksGridPage from "../modules/marks/MarksGridPage";
+
+
+
+
 export default function AppRouter() {
   return (
     <Routes>
@@ -41,12 +49,19 @@ export default function AppRouter() {
         <Route path="students" element={<StudentsPage />} />
 
         {/* Next modules */}
-        <Route path="exams" element={<div>Exams (next)</div>} />
-        <Route path="marks" element={<div>Marks Entry (next)</div>} />
+        {/* <Route path="exams" element={<div>Exams (next)</div>} /> */}
+        {/* <Route path="marks" element={<div>Marks Entry (next)</div>} /> */}
+        <Route path="marks" element={<MarksEntryPage />} />
+        <Route path="marks/grid" element={<MarksGridPage />} />
         <Route path="reports" element={<div>Reports (next)</div>} />
         <Route path="corrections" element={<div>Corrections (next)</div>} />
         <Route path="public" element={<div>Public Portal (later)</div>} />
         <Route path="my-results" element={<div>My Results (later)</div>} />
+
+        <Route path="exams" element={<ExamsPage />} />
+        <Route path="exams/:examId/components" element={<ExamComponentsPage />} />
+
+
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />
