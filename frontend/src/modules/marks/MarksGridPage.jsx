@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -8,6 +8,8 @@ import { Input } from "../../components/ui/input";
 import { Badge } from "../../components/ui/badge";
 import { Card, CardContent } from "../../components/ui/card";
 import { Separator } from "../../components/ui/separator";
+
+
 
 function pad4(code) {
   const s = String(code ?? "").trim();
@@ -54,6 +56,53 @@ export default function MarksGridPage() {
   const [marksByEnrollment, setMarksByEnrollment] = useState({});
   const [ledgerByEnrollment, setLedgerByEnrollment] = useState({});
   const [loadingLedgers, setLoadingLedgers] = useState(false);
+  const [savingAll, setSavingAll] = useState(false);
+  const [saveAllProgress, setSaveAllProgress] = useState({ done: 0, total: 0 });
+
+
+//===============Keyboard Navigation Feature starts from here=================
+    const inputRefs = useRef({});
+    const cellKey = (enrollmentId, code) => `${enrollmentId}__${code}`;
+
+    const focusCell = (enrollmentId, code) => {
+      const k = cellKey(enrollmentId, code);
+      const el = inputRefs.current[k];
+      if (el && typeof el.focus === "function") {
+        el.focus();
+        el.select?.();
+      }
+    };
+
+    const moveFocus = (rowIndex, colIndex, dir) => {
+      const totalRows = students.length;
+      const totalCols = columns.length;
+
+      if (totalRows === 0 || totalCols === 0) return;
+
+      let r = rowIndex;
+      let c = colIndex + dir;
+
+      while (true) {
+        if (c >= totalCols) {
+          r += 1;
+          c = 0;
+        } else if (c < 0) {
+          r -= 1;
+          c = totalCols - 1;
+        }
+
+        if (r < 0 || r >= totalRows) return;
+
+        const enrollmentId = students[r].enrollment_id;
+        const code = columns[c].code;
+
+        focusCell(enrollmentId, code);
+        return;
+      }
+    };
+
+
+  
 
   // ---------------- EXAMS ----------------
   const examsQ = useQuery({
@@ -176,6 +225,70 @@ export default function MarksGridPage() {
     loadLedgers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canLoad]);
+
+  const saveAll = async () => {
+    if (!examId || !sectionId) {
+      toast.error("Select exam and section first");
+      return;
+    }
+    if (isLocked) {
+      toast.error("Exam is locked/published. Cannot save.");
+      return;
+    }
+    if (students.length === 0) {
+      toast.error("No students found");
+      return;
+    }
+
+    setSavingAll(true);
+    setSaveAllProgress({ done: 0, total: students.length });
+
+    const errors = [];
+
+    try {
+      for (let i = 0; i < students.length; i++) {
+        const s = students[i];
+        const eid = s.enrollment_id;
+
+        try {
+          const row = marksByEnrollment[eid] || {};
+          const items = Object.entries(row).map(([component_code, value]) => ({
+            component_code,
+            marks: value === "" ? null : Number(value),
+          }));
+
+          const payload = { marks: items, items, by_code: row };
+
+          await api.post(`/api/marks/${examId}/enrollments/${eid}`, payload);
+        } catch (e) {
+          errors.push({
+            enrollment_id: eid,
+            symbol_no: s.symbol_no,
+            name: s.full_name,
+            message: e?.response?.data?.message || e.message || "Save failed",
+          });
+        } finally {
+          setSaveAllProgress({ done: i + 1, total: students.length });
+        }
+      }
+
+      if (errors.length === 0) {
+        toast.success(`Saved all (${students.length})`);
+      } else {
+        toast.error(`Saved with ${errors.length} error(s). Check console.`);
+        console.table(errors);
+      }
+
+      // Optional: refresh ledgers from backend after save
+      // await loadLedgers();
+    } finally {
+      setSavingAll(false);
+    }
+  };
+
+
+
+
 
   // ---------------- BUILD GRID COLUMNS (enabled components) ----------------
   const columns = useMemo(() => {
@@ -323,6 +436,24 @@ export default function MarksGridPage() {
 
       <div className="rounded-lg border">
         <div className="p-3 border-b flex items-center justify-between">
+
+          <div className="flex items-center gap-2">
+            {savingAll ? (
+              <Badge variant="outline">
+                Saving {saveAllProgress.done}/{saveAllProgress.total}
+              </Badge>
+            ) : null}
+
+            <Button
+              variant="outline"
+              onClick={saveAll}
+              disabled={!examId || !sectionId || savingAll || loadingLedgers || isLocked}
+            >
+              {savingAll ? "Saving..." : "Save All"}
+            </Button>
+          </div>
+
+
           <div className="text-sm font-medium">Grid</div>
           <div className="text-xs text-muted-foreground">
             Tip: Save per student row first. “Save all” comes next.
@@ -399,7 +530,7 @@ export default function MarksGridPage() {
 
                           return (
                             <td key={c.code} className="p-2 text-center">
-                              <Input
+                              {/* <Input
                                 disabled={isLocked}
                                 value={value}
                                 placeholder={full != null ? `0-${full}` : "marks"}
@@ -408,7 +539,32 @@ export default function MarksGridPage() {
                                   const v = safeNum(e.target.value);
                                   setMark(eid, c.code, v === "" ? "" : String(v));
                                 }}
+                              /> */}
+                              <Input
+                                disabled={isLocked}
+                                value={value}
+                                placeholder={full != null ? `0-${full}` : "marks"}
+                                className={isInvalid ? "border-destructive" : ""}
+                                ref={(el) => {
+                                  if (!el) return;
+                                  inputRefs.current[cellKey(eid, c.code)] = el;
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    const dir = e.shiftKey ? -1 : 1;
+                                    const rIndex = students.findIndex((x) => x.enrollment_id === eid);
+                                    const cIndex = columns.findIndex((x) => x.code === c.code);
+                                    moveFocus(rIndex, cIndex, dir);
+                                  }
+                                }}
+                                onChange={(e) => {
+                                  const v = safeNum(e.target.value);
+                                  setMark(eid, c.code, v === "" ? "" : String(v));
+                                }}
                               />
+
+
                               {isInvalid ? (
                                 <div className="text-[11px] text-destructive mt-1">
                                   Invalid
