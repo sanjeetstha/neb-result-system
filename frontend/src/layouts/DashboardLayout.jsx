@@ -9,7 +9,6 @@ import { useMe, logoutHard } from "../lib/useMe";
 import { Sheet, SheetContent } from "../components/ui/sheet";
 import { getSidebarCollapsed, setSidebarCollapsed } from "../lib/uiState";
 
-
 export default function DashboardLayout() {
   const { data: me, isLoading, error } = useMe();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -32,28 +31,33 @@ export default function DashboardLayout() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <Topbar
-        me={me}
-        onOpenSidebar={() => setMobileOpen(true)}
-        onToggleCollapse={() =>
-          setCollapsed((v) => {
-            const next = !v;
-            setSidebarCollapsed(next);
-            return next;
-          })
-        }
+    // ✅ full screen shell + prevent page-level horizontal scroll
+    <div className="h-screen w-full overflow-x-hidden bg-background">
+      {/* ✅ Topbar stays fixed */}
+      <div className="sticky top-0 z-50">
+        <Topbar
+          me={me}
+          onOpenSidebar={() => setMobileOpen(true)}
+          onToggleCollapse={() =>
+            setCollapsed((v) => {
+              const next = !v;
+              setSidebarCollapsed(next);
+              return next;
+            })
+          }
+          collapsed={collapsed}
+          onLogout={onLogout}
+        />
+      </div>
 
-        collapsed={collapsed}
-        onLogout={onLogout}
-      />
-
-
-      <div className="flex">
-        {/* Desktop sidebar */}
+      {/* ✅ Body: sidebar + content */}
+      <div className="flex h-[calc(100vh-56px)] w-full">
+        {/* Desktop sidebar (sticky and independently scrollable) */}
         <aside
           className={[
-            "hidden md:block border-r transition-all duration-300",
+            "hidden md:block shrink-0 border-r bg-background",
+            "sticky top-[56px] h-[calc(100vh-56px)] overflow-y-auto",
+            "transition-all duration-300",
             collapsed ? "w-16" : "w-64",
           ].join(" ")}
         >
@@ -64,7 +68,6 @@ export default function DashboardLayout() {
             collapsed={collapsed}
           />
         </aside>
-
 
         {/* Mobile sidebar */}
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
@@ -81,8 +84,8 @@ export default function DashboardLayout() {
           </SheetContent>
         </Sheet>
 
-        {/* Main content */}
-        <main className="flex-1 p-4 md:p-6">
+        {/* Main content area (ONLY this scrolls vertically) */}
+        <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6">
           <div className="rounded-lg border p-4">
             {isLoading ? (
               <div className="text-sm text-muted-foreground">Loading...</div>
@@ -93,7 +96,11 @@ export default function DashboardLayout() {
 
           {/* Debug (remove later) */}
           <pre className="text-xs mt-4 bg-muted p-3 rounded-md overflow-auto">
-{JSON.stringify({ me, apiBase: import.meta.env.VITE_API_BASE_URL }, null, 2)}
+            {JSON.stringify(
+              { me, apiBase: import.meta.env.VITE_API_BASE_URL },
+              null,
+              2
+            )}
           </pre>
         </main>
       </div>
