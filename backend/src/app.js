@@ -16,6 +16,8 @@ const correctionsRoutes = require("./routes/corrections.routes");
 const importRoutes = require("./routes/import.routes");
 const publicRoutes = require("./routes/public.routes");
 const exportRoutes = require("./routes/export.routes");
+const inviteRoutes = require("./routes/invites.routes");
+const invitesRoutes = require("./routes/invites.routes");
 
 app.use(helmet());
 app.use(cors());
@@ -35,6 +37,8 @@ app.use("/api/corrections", correctionsRoutes);
 app.use("/api/import", importRoutes);
 app.use("/api/public", publicRoutes);
 app.use("/api/exports", exportRoutes);
+app.use("/api/invites", inviteRoutes);
+app.use("/api/invites", invitesRoutes);
 
 
 app.get("/api/health", async (req, res) => {

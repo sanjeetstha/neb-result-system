@@ -16,6 +16,7 @@ import {
   Globe,
   LogOut,
   Search,
+  UserPlus,
 } from "lucide-react";
 
 /**
@@ -47,16 +48,20 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
 
   const isMobile = variant === "mobile";
   const isCollapsed = isMobile ? false : collapsed;
-  
+
   // Get role-based menu items - using the same structure as menu.js
   const role = me?.role || "STUDENT";
-  
+
   // Define the menu items directly in this component to avoid import issues
   const MENUS = {
     SUPER_ADMIN: [
       { label: "Dashboard", path: "/", icon: LayoutDashboard },
       { label: "Masters", path: "/masters", icon: Building2 },
       { label: "Students", path: "/students", icon: Users },
+
+      // ✅ NEW: Invite UI
+      { label: "Invites", path: "/admin/invites", icon: UserPlus },
+
       { label: "Exams", path: "/exams", icon: ClipboardList },
       { label: "Marks Entry", path: "/marks", icon: PencilRuler },
       { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
@@ -85,7 +90,7 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
     ],
     PUBLIC: [{ label: "Public Portal", path: "/public", icon: Globe }],
   };
-  
+
   const menuItems = MENUS[role] || MENUS.STUDENT;
 
   const filtered = useMemo(() => {
@@ -139,27 +144,33 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
   );
 
   return (
-    <div className={cn(
-      "h-full w-full flex flex-col bg-gradient-to-b from-sidebar to-sidebar/95 border-r border-border/50 shadow-sm relative overflow-hidden",
-      "transition-all duration-500 ease-in-out",
-      isCollapsed ? "w-16" : "w-64"
-    )}>
+    <div
+      className={cn(
+        "h-full w-full flex flex-col bg-gradient-to-b from-sidebar to-sidebar/95 border-r border-border/50 shadow-sm relative overflow-hidden",
+        "transition-all duration-500 ease-in-out",
+        isCollapsed ? "w-16" : "w-64"
+      )}
+    >
       {/* Subtle pattern overlay */}
       <div className="absolute inset-0 bg-grid-pattern opacity-[0.02] pointer-events-none" />
-      
+
       {header}
 
       {/* search - enhanced with icon and focus state */}
       {!isCollapsed && (
-        <div className={cn(
-          "px-4 py-3 transition-all duration-300",
-          isSearchFocused && "bg-muted/30"
-        )}>
+        <div
+          className={cn(
+            "px-4 py-3 transition-all duration-300",
+            isSearchFocused && "bg-muted/30"
+          )}
+        >
           <div className="relative">
-            <Search className={cn(
-              "absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground transition-colors duration-200",
-              isSearchFocused && "text-primary"
-            )} />
+            <Search
+              className={cn(
+                "absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground transition-colors duration-200",
+                isSearchFocused && "text-primary"
+              )}
+            />
             <Input
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -176,25 +187,37 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
       )}
 
       {/* nav with enhanced hover effects */}
-      <div className={cn("flex-1 overflow-y-auto py-3 transition-all duration-300", isCollapsed && "px-1", !isCollapsed && "px-2")}>
+      <div
+        className={cn(
+          "flex-1 overflow-y-auto py-3 transition-all duration-300",
+          isCollapsed && "px-1",
+          !isCollapsed && "px-2"
+        )}
+      >
         <div className="space-y-1">
           {filtered.map((item, index) => {
             const Icon = item.icon;
-            const active = location.pathname === item.path || location.pathname.startsWith(item.path + "/");
-            
+            const active =
+              location.pathname === item.path ||
+              location.pathname.startsWith(item.path + "/");
+
             return (
               <NavLink
                 key={item.path}
                 to={item.path}
-                className={({ isActive }) => cn(
-                  "group flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all duration-200 relative overflow-hidden",
-                  "hover:bg-muted/50 hover:translate-x-1 hover:shadow-sm",
-                  isActive ? "bg-gradient-to-r from-primary/10 to-primary/5 font-medium text-primary shadow-sm" : "",
-                  isCollapsed && "justify-center px-2"
-                )}
+                className={({ isActive }) =>
+                  cn(
+                    "group flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all duration-200 relative overflow-hidden",
+                    "hover:bg-muted/50 hover:translate-x-1 hover:shadow-sm",
+                    isActive
+                      ? "bg-gradient-to-r from-primary/10 to-primary/5 font-medium text-primary shadow-sm"
+                      : "",
+                    isCollapsed && "justify-center px-2"
+                  )
+                }
                 title={item.label}
                 style={{
-                  animationDelay: `${index * 50}ms`
+                  animationDelay: `${index * 50}ms`,
                 }}
                 end={item.path === "/"}
               >
@@ -202,20 +225,26 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
                 {active && (
                   <div className="absolute left-0 top-1/2 transform -translate-y-1/2 h-6 w-1 bg-primary rounded-r-full" />
                 )}
-                
-                <Icon className={cn(
-                  "h-4 w-4 shrink-0 transition-all duration-200",
-                  active && "text-primary scale-110",
-                  !active && "group-hover:scale-105"
-                )} />
-                
+
+                <Icon
+                  className={cn(
+                    "h-4 w-4 shrink-0 transition-all duration-200",
+                    active && "text-primary scale-110",
+                    !active && "group-hover:scale-105"
+                  )}
+                />
+
                 {!isCollapsed ? (
-                  <span className={cn(
-                    "truncate transition-all duration-200",
-                    active && "font-medium"
-                  )}>{item.label}</span>
+                  <span
+                    className={cn(
+                      "truncate transition-all duration-200",
+                      active && "font-medium"
+                    )}
+                  >
+                    {item.label}
+                  </span>
                 ) : null}
-                
+
                 {/* Hover indicator for collapsed state */}
                 {isCollapsed && (
                   <div className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded-md shadow-md opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-200 whitespace-nowrap z-50">
@@ -228,7 +257,12 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
           })}
 
           {filtered.length === 0 ? (
-            <div className={cn("px-3 py-2 text-xs text-muted-foreground animate-pulse", isCollapsed && "hidden")}>
+            <div
+              className={cn(
+                "px-3 py-2 text-xs text-muted-foreground animate-pulse",
+                isCollapsed && "hidden"
+              )}
+            >
               No menu found.
             </div>
           ) : null}
@@ -257,7 +291,7 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
           </div>
         ) : null}
       </div>
-      
+
       {/* Add custom styles for animations */}
       <style jsx>{`
         @keyframes fade-in {
@@ -270,15 +304,22 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
             transform: translateY(0);
           }
         }
-        
+
         .animate-fade-in {
           animation: fade-in 0.3s ease-out;
         }
-        
+
         .bg-grid-pattern {
-          background-image: 
-            linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
-            linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+          background-image: linear-gradient(
+              to right,
+              rgba(255, 255, 255, 0.05) 1px,
+              transparent 1px
+            ),
+            linear-gradient(
+              to bottom,
+              rgba(255, 255, 255, 0.05) 1px,
+              transparent 1px
+            );
           background-size: 20px 20px;
         }
       `}</style>

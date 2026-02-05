@@ -2,6 +2,10 @@ const db = require("../db");
 const { hashPassword, verifyPassword } = require("../utils/crypto");
 const { signJwt } = require("../utils/jwt");
 
+const crypto = require("crypto");
+// const bcrypt = require("bcryptjs");
+
+
 // One-time endpoint: create first SUPER_ADMIN if none exists
 async function bootstrapSuperAdmin(req, res) {
   const { full_name, email, password } = req.body || {};
@@ -96,7 +100,79 @@ async function createUser(req, res) {
   }
 }
 
+// invitation controller-------------------------
+function sha256(s) {
+  return crypto.createHash("sha256").update(String(s)).digest("hex");
+}
+function normEmail(e) {
+  return String(e || "").trim().toLowerCase();
+}
+
+async function acceptInvite(req, res) {
+  try {
+    const token = String(req.body?.token || "").trim();
+    const full_name = String(req.body?.full_name || "").trim();
+    const password = String(req.body?.password || "").trim();
+
+    if (!token || !full_name || !password) {
+      return res.status(400).json({ ok: false, message: "token, full_name, password required" });
+    }
+
+    const tokenHash = sha256(token);
+
+    const [[inv]] = await db.query(
+      `SELECT * FROM user_invites
+       WHERE token_hash=? AND used_at IS NULL AND revoked_at IS NULL
+       LIMIT 1`,
+      [tokenHash]
+    );
+
+    if (!inv) return res.status(404).json({ ok: false, message: "Invalid invite token" });
+    if (new Date(inv.expires_at).getTime() <= Date.now()) {
+      return res.status(410).json({ ok: false, message: "Invite expired" });
+    }
+
+    const email = normEmail(inv.email);
+
+    // user already exists?
+    const [[existingUser]] = await db.query(`SELECT id FROM users WHERE email=? LIMIT 1`, [email]);
+    if (existingUser) {
+      return res.status(409).json({ ok: false, message: "User already exists with this email" });
+    }
+
+    // ✅ find role_id from roles table (inv.role is like "TEACHER")
+    const [[roleRow]] = await db.query(`SELECT id FROM roles WHERE name=? LIMIT 1`, [inv.role]);
+    if (!roleRow) return res.status(400).json({ ok: false, message: "Invalid role in invite" });
+
+      const hash = await hashPassword(password);
+
+
+    // ✅ insert user with role_id (NOT role)
+    // const [ins] = await db.query(
+    //   `INSERT INTO users (role_id, full_name, email, password_hash, is_active, created_by, created_at)
+    //    VALUES (?,?,?,?,1,?,NOW())`,
+    //   [roleRow.id, full_name, email, hash, inv.created_by]
+    // );
+    // get role_id from roles table using inv.role
+    // const [[roleRow]] = await db.query(`SELECT id FROM roles WHERE name=? LIMIT 1`, [inv.role]);
+    if (!roleRow) return res.status(400).json({ ok: false, message: "Invalid role in invite" });
+
+    const [ins] = await db.query(
+      `INSERT INTO users (role_id, full_name, email, password_hash, is_active)
+      VALUES (?,?,?,?,1)`,
+      [roleRow.id, full_name, email, hash]
+    );
+
+
+    // mark invite used
+    await db.query(`UPDATE user_invites SET used_at=NOW() WHERE id=?`, [inv.id]);
+
+    return res.json({ ok: true, message: "Account created", user_id: ins.insertId });
+  } catch (e) {
+    return res.status(500).json({ ok: false, message: "Accept invite failed", error: String(e.message || e) });
+  }
+}
 
 
 
-module.exports = { bootstrapSuperAdmin, login, createUser };
+module.exports = { bootstrapSuperAdmin, login, createUser, acceptInvite };

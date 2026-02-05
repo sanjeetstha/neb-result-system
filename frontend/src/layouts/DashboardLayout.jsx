@@ -2,6 +2,8 @@ import { Outlet } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import { NavLink } from "react-router-dom";
+
 import Sidebar from "../components/sidebar/Sidebar";
 import Topbar from "../components/topbar/Topbar";
 import { useMe, logoutHard } from "../lib/useMe";

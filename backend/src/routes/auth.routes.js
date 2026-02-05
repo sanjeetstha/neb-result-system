@@ -1,11 +1,27 @@
+// const router = require("express").Router();
+// const {
+//   login,
+//   acceptInvite,     // ✅ add this
+//   // ...other exports if you have
+// } = require("../controllers/auth.controller");
+
+// // PUBLIC
+// router.post("/login", login);
+// router.post("/accept-invite", acceptInvite); // ✅
+
+// // ... other routes you already have
+
+// module.exports = router;
+
+
 const router = require("express").Router();
-const { bootstrapSuperAdmin, login, createUser } = require("../controllers/auth.controller");
-const { requireAuth, requireRole } = require("../middlewares/auth");
+const authController = require("../controllers/auth.controller");
 
-router.post("/bootstrap-superadmin", bootstrapSuperAdmin);
-router.post("/login", login);
+router.post("/bootstrap-super-admin", authController.bootstrapSuperAdmin);
+router.post("/login", authController.login);
+router.post("/create-user", authController.createUser);
 
-// SUPER_ADMIN can create ADMIN/TEACHER/STUDENT
-router.post("/users", requireAuth, requireRole("SUPER_ADMIN"), createUser);
+// public (invite accept)
+router.post("/accept-invite", authController.acceptInvite);
 
 module.exports = router;
