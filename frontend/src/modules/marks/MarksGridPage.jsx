@@ -72,9 +72,17 @@ export default function MarksGridPage() {
 
   const [savingAll, setSavingAll] = useState(false);
   const [saveAllProgress, setSaveAllProgress] = useState({ done: 0, total: 0 });
+  const [generatingAll, setGeneratingAll] = useState(false);
+  const [generateProgress, setGenerateProgress] = useState({ done: 0, total: 0 });
 
   // ✅ NEW FEATURE: student search
   const [studentQuery, setStudentQuery] = useState("");
+  const [columnQuery, setColumnQuery] = useState("");
+  const [columnTypes, setColumnTypes] = useState({ TH: true, IN: true, PR: true });
+
+  // ✅ Import state
+  const [importFile, setImportFile] = useState(null);
+  const [importSummary, setImportSummary] = useState(null);
 
   // ✅ baseline marks (to detect unsaved changes)
   const baselineRef = useRef({}); // { [enrollment_id]: { [component_code]: "12" } }
@@ -176,6 +184,10 @@ export default function MarksGridPage() {
     setPreviewStudent(null);
     setPreviewData(null);
     setStudentQuery("");
+    setColumnQuery("");
+    setColumnTypes({ TH: true, IN: true, PR: true });
+    setImportFile(null);
+    setImportSummary(null);
     baselineRef.current = {};
   }, [examId, sectionId]);
 
@@ -266,12 +278,31 @@ export default function MarksGridPage() {
     return arr;
   }, [ledgerByEnrollment]);
 
+  const visibleColumns = useMemo(() => {
+    const q = String(columnQuery || "").trim().toLowerCase();
+    return columns.filter((c) => {
+      const type = c.component_type || "TH";
+      if (!columnTypes[type]) return false;
+      if (!q) return true;
+      const hay = [
+        c.subject_name,
+        c.title,
+        c.code,
+        c.component_type,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [columns, columnQuery, columnTypes]);
+
   // ---------------- GROUPED COLUMNS BY SUBJECT ----------------
   const groupedColumns = useMemo(() => {
     const groups = [];
     const idx = new Map();
 
-    for (const c of columns) {
+    for (const c of visibleColumns) {
       const key = c.subject_name || "Other";
       if (!idx.has(key)) {
         idx.set(key, groups.length);
@@ -292,7 +323,7 @@ export default function MarksGridPage() {
     }
 
     return groups;
-  }, [columns]);
+  }, [visibleColumns]);
 
   // ---------------- NEW: FILTERED STUDENTS ----------------
   const visibleStudents = useMemo(() => {
@@ -351,7 +382,7 @@ export default function MarksGridPage() {
 
   const moveFocus = (rowIndex, colIndex, dir) => {
     const totalRows = visibleStudents.length;
-    const totalCols = columns.length;
+    const totalCols = visibleColumns.length;
     if (totalRows === 0 || totalCols === 0) return;
 
     let r = rowIndex;
@@ -369,7 +400,7 @@ export default function MarksGridPage() {
       if (r < 0 || r >= totalRows) return;
 
       const enrollmentId = visibleStudents[r].enrollment_id;
-      const code = columns[c].code;
+      const code = visibleColumns[c].code;
       focusCell(enrollmentId, code);
       return;
     }
@@ -440,6 +471,70 @@ export default function MarksGridPage() {
     } finally {
       setSavingAll(false);
     }
+  };
+
+  const generateAll = async () => {
+    if (!examId || !sectionId) return toast.error("Select exam and section first");
+    if (isLocked) return toast.error("Exam is locked/published. Cannot generate.");
+    if (students.length === 0) return toast.error("No students found");
+
+    setGeneratingAll(true);
+    setGenerateProgress({ done: 0, total: students.length });
+
+    const errors = [];
+    try {
+      for (let i = 0; i < students.length; i++) {
+        const s = students[i];
+        const eid = s.enrollment_id;
+        try {
+          await api.post(`/api/results/${examId}/enrollments/${eid}/generate`);
+        } catch (e) {
+          errors.push({
+            enrollment_id: eid,
+            symbol_no: s.symbol_no,
+            name: s.full_name,
+            message: e?.response?.data?.message || e.message || "Generate failed",
+          });
+        } finally {
+          setGenerateProgress({ done: i + 1, total: students.length });
+        }
+      }
+
+      if (errors.length === 0) toast.success(`Generated all (${students.length})`);
+      else {
+        toast.error(`Generated with ${errors.length} error(s). Check console.`);
+        console.table(errors);
+      }
+    } finally {
+      setGeneratingAll(false);
+    }
+  };
+
+  // ---------------- IMPORT ----------------
+  const importMutation = useMutation({
+    mutationFn: async (file) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await api.post(`/api/import/marks?exam_id=${examId}`, fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      return res.data;
+    },
+    onSuccess: (data) => {
+      setImportSummary(data);
+      setImportFile(null);
+      toast.success(`Imported ${data?.imported || 0} rows`);
+      if (sectionId) loadLedgers();
+    },
+    onError: (e) =>
+      toast.error(e?.response?.data?.message || e.message || "Import failed"),
+  });
+
+  const onImport = () => {
+    if (!examId) return toast.error("Select exam first");
+    if (isLocked) return toast.error("Exam is locked/published. Import disabled.");
+    if (!importFile) return toast.error("Choose a file to import");
+    importMutation.mutate(importFile);
   };
 
   // ---------------- HELPERS ----------------
@@ -574,7 +669,9 @@ export default function MarksGridPage() {
 
               <Badge variant="outline">Students: {studentsQ.isLoading ? "…" : students.length}</Badge>
               <Badge variant="outline">Visible: {visibleStudents.length}</Badge>
-              <Badge variant="outline">Columns: {columns.length}</Badge>
+              <Badge variant="outline">
+                Columns: {visibleColumns.length}/{columns.length}
+              </Badge>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
@@ -585,6 +682,29 @@ export default function MarksGridPage() {
                   onChange={(e) => setStudentQuery(e.target.value)}
                   placeholder="Search: symbol / name / roll / regd…"
                 />
+              </div>
+
+              <div className="w-full sm:w-[260px]">
+                <Input
+                  value={columnQuery}
+                  onChange={(e) => setColumnQuery(e.target.value)}
+                  placeholder="Filter columns..."
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                {["TH", "IN", "PR"].map((t) => (
+                  <label key={t} className="text-xs flex items-center gap-1">
+                    <input
+                      type="checkbox"
+                      checked={!!columnTypes[t]}
+                      onChange={(e) =>
+                        setColumnTypes((p) => ({ ...p, [t]: e.target.checked }))
+                      }
+                    />
+                    {t}
+                  </label>
+                ))}
               </div>
 
               <Button
@@ -608,8 +728,82 @@ export default function MarksGridPage() {
               >
                 {savingAll ? "Saving..." : "Save All"}
               </Button>
+
+              {generatingAll ? (
+                <Badge variant="outline">
+                  Generating {generateProgress.done}/{generateProgress.total}
+                </Badge>
+              ) : null}
+
+              <Button
+                variant="secondary"
+                onClick={generateAll}
+                disabled={!examId || !sectionId || generatingAll || loadingLedgers || isLocked}
+              >
+                {generatingAll ? "Generating..." : "Generate All"}
+              </Button>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-sm font-medium">Import Marks (Excel/CSV)</div>
+              <div className="text-xs text-muted-foreground">
+                Use the fixed template with columns: symbol_no, component_code, marks_obtained, is_absent.
+              </div>
+            </div>
+            <a
+              href="/marks_import_template.csv"
+              download
+              className="text-xs text-primary underline"
+            >
+              Download template
+            </a>
+          </div>
+
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_auto]">
+            <Input
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={(e) => {
+                const file = e.target.files?.[0] || null;
+                setImportFile(file);
+                setImportSummary(null);
+              }}
+            />
+            <Button
+              onClick={onImport}
+              disabled={!examId || !importFile || importMutation.isPending || isLocked}
+            >
+              {importMutation.isPending ? "Importing..." : "Import Marks"}
+            </Button>
+          </div>
+
+          {importSummary ? (
+            <div className="rounded-md border p-3 text-xs space-y-1">
+              <div>Sheet: {importSummary.sheet || "—"}</div>
+              <div>
+                Imported: {importSummary.imported || 0} • Skipped:{" "}
+                {importSummary.skipped || 0} • Errors: {importSummary.errors_count || 0}
+              </div>
+              {Array.isArray(importSummary.errors) && importSummary.errors.length > 0 ? (
+                <div className="pt-2 text-muted-foreground">
+                  <div className="font-medium text-foreground mb-1">First errors:</div>
+                  <ul className="space-y-1">
+                    {importSummary.errors.slice(0, 5).map((e, idx) => (
+                      <li key={idx}>
+                        Row {e.row}: {e.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -640,6 +834,11 @@ export default function MarksGridPage() {
           ) : columns.length === 0 ? (
             <div className="text-sm text-muted-foreground">
               No enabled components found for this exam. Configure exam components first.
+            </div>
+          ) : visibleColumns.length === 0 ? (
+            <div className="text-sm text-muted-foreground">
+              No columns match filter:{" "}
+              <span className="font-medium">{columnQuery || "—"}</span>
             </div>
           ) : visibleStudents.length === 0 ? (
             <div className="text-sm text-muted-foreground">
@@ -833,7 +1032,7 @@ export default function MarksGridPage() {
                                         const rIndex = visibleStudents.findIndex(
                                           (x) => x.enrollment_id === eid
                                         );
-                                        const cIndex = columns.findIndex(
+                                        const cIndex = visibleColumns.findIndex(
                                           (x) => x.code === c.code
                                         );
                                         moveFocus(rIndex, cIndex, dir);

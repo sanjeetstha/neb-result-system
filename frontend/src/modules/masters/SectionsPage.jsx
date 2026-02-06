@@ -2,10 +2,12 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
+import { usePagination } from "../../lib/usePagination";
 
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Badge } from "../../components/ui/badge";
+import PaginationBar from "../../components/ui/pagination-bar";
 import {
   Dialog,
   DialogContent,
@@ -46,7 +48,7 @@ function normalizeSectionPayload(form) {
   if (!name) return { error: "Section name is required (e.g., A)" };
 
   return {
-    payload: { campus_id, academic_year_id, class_id, faculty_id, name },
+    payload: { campus_id, academic_year_id, class_id, faculty_id, name, is_active: form.is_active !== false },
   };
 }
 
@@ -73,14 +75,17 @@ function Select({ label, value, onChange, options, placeholder }) {
 export default function SectionsPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
 
-  // Create form state
+  // Create/edit form state
   const [form, setForm] = useState({
     campus_id: "",
     academic_year_id: "",
     class_id: "",
     faculty_id: "",
     name: "",
+    is_active: true,
   });
 
   // Filters for list
@@ -104,8 +109,7 @@ export default function SectionsPage() {
     queryKey: ["masters", "academic-years"],
     queryFn: async () => {
       const res = await api.get("/api/masters/academic-years");
-      const data =
-        res.data?.academic_years ?? res.data?.years ?? res.data?.data ?? [];
+      const data = res.data?.academic_years ?? res.data?.years ?? res.data?.data ?? [];
       return Array.isArray(data) ? data : [];
     },
     staleTime: 60_000,
@@ -150,18 +154,31 @@ export default function SectionsPage() {
     },
     onSuccess: async () => {
       toast.success("Section created");
-      setForm({
-        campus_id: "",
-        academic_year_id: "",
-        class_id: "",
-        faculty_id: "",
-        name: "",
-      });
+      setForm({ campus_id: "", academic_year_id: "", class_id: "", faculty_id: "", name: "", is_active: true });
       setOpen(false);
       await qc.invalidateQueries({ queryKey: ["masters", "sections"] });
     },
     onError: (err) => {
       toast.error(err?.response?.data?.message || err.message || "Failed to create section");
+    },
+  });
+
+  const update = useMutation({
+    mutationFn: async () => {
+      const { payload, error } = normalizeSectionPayload(form);
+      if (error) throw new Error(error);
+      const res = await api.put(`/api/masters/sections/${editingId}`, payload);
+      return res.data;
+    },
+    onSuccess: async () => {
+      toast.success("Section updated");
+      setEditOpen(false);
+      setEditingId(null);
+      setForm({ campus_id: "", academic_year_id: "", class_id: "", faculty_id: "", name: "", is_active: true });
+      await qc.invalidateQueries({ queryKey: ["masters", "sections"] });
+    },
+    onError: (err) => {
+      toast.error(err?.response?.data?.message || err.message || "Failed to update section");
     },
   });
 
@@ -248,6 +265,83 @@ export default function SectionsPage() {
       .sort((a, b) => Number(b.id) - Number(a.id));
   }, [sectionsQ.data, filter]);
 
+  const pager = usePagination(rows, 10);
+
+  const openEdit = (r) => {
+    setEditingId(r.id);
+    setForm({
+      campus_id: String(r.campus_id || ""),
+      academic_year_id: String(r.academic_year_id || ""),
+      class_id: String(r.class_id || ""),
+      faculty_id: String(r.faculty_id || ""),
+      name: r.name || "",
+      is_active: r.is_active,
+    });
+    setEditOpen(true);
+  };
+
+  const renderForm = (onSave, label) => (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Select
+          label="Campus"
+          value={form.campus_id}
+          onChange={(v) => setForm((p) => ({ ...p, campus_id: v }))}
+          options={campusOptions}
+          placeholder="Select campus"
+        />
+        <Select
+          label="Academic Year (BS)"
+          value={form.academic_year_id}
+          onChange={(v) => setForm((p) => ({ ...p, academic_year_id: v }))}
+          options={yearOptions}
+          placeholder="Select year"
+        />
+        <Select
+          label="Class"
+          value={form.class_id}
+          onChange={(v) => setForm((p) => ({ ...p, class_id: v }))}
+          options={classOptions}
+          placeholder="Select class"
+        />
+        <Select
+          label="Faculty"
+          value={form.faculty_id}
+          onChange={(v) => setForm((p) => ({ ...p, faculty_id: v }))}
+          options={facultyOptions}
+          placeholder="Select faculty"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Section name</label>
+        <Input
+          placeholder="e.g., A"
+          value={form.name}
+          onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+        />
+      </div>
+
+      <label className="text-sm flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={form.is_active}
+          onChange={(e) => setForm((p) => ({ ...p, is_active: e.target.checked }))}
+        />
+        Active section
+      </label>
+
+      <div className="flex justify-end gap-2">
+        <Button variant="outline" onClick={() => { setOpen(false); setEditOpen(false); }}>
+          Cancel
+        </Button>
+        <Button onClick={onSave} disabled={create.isPending || update.isPending}>
+          {create.isPending || update.isPending ? "Saving..." : label}
+        </Button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
@@ -267,61 +361,7 @@ export default function SectionsPage() {
             <DialogHeader>
               <DialogTitle>Add section</DialogTitle>
             </DialogHeader>
-
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Select
-                  label="Campus"
-                  value={form.campus_id}
-                  onChange={(v) => setForm((p) => ({ ...p, campus_id: v }))}
-                  options={campusOptions}
-                  placeholder="Select campus"
-                />
-                <Select
-                  label="Academic Year (BS)"
-                  value={form.academic_year_id}
-                  onChange={(v) => setForm((p) => ({ ...p, academic_year_id: v }))}
-                  options={yearOptions}
-                  placeholder="Select year"
-                />
-                <Select
-                  label="Class"
-                  value={form.class_id}
-                  onChange={(v) => setForm((p) => ({ ...p, class_id: v }))}
-                  options={classOptions}
-                  placeholder="Select class"
-                />
-                <Select
-                  label="Faculty"
-                  value={form.faculty_id}
-                  onChange={(v) => setForm((p) => ({ ...p, faculty_id: v }))}
-                  options={facultyOptions}
-                  placeholder="Select faculty"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Section name</label>
-                <Input
-                  placeholder="e.g., A"
-                  value={form.name}
-                  onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-                />
-              </div>
-
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => setOpen(false)}
-                  disabled={create.isPending}
-                >
-                  Cancel
-                </Button>
-                <Button onClick={() => create.mutate()} disabled={create.isPending}>
-                  {create.isPending ? "Saving..." : "Save"}
-                </Button>
-              </div>
-            </div>
+            {renderForm(() => create.mutate(), "Save")}
           </DialogContent>
         </Dialog>
       </div>
@@ -400,18 +440,19 @@ export default function SectionsPage() {
                   <TableHead>Faculty</TableHead>
                   <TableHead className="w-[90px]">Section</TableHead>
                   <TableHead className="w-[120px]">Status</TableHead>
+                  <TableHead className="w-[120px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
 
               <TableBody>
-                {rows.length === 0 ? (
+                {pager.pageItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
                       {sectionsQ.isLoading ? "Loading..." : "No sections found."}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rows.map((r) => {
+                  pager.pageItems.map((r) => {
                     const c = campusMap.get(r.campus_id);
                     const y = yearMap.get(r.academic_year_id);
                     const f = facultyMap.get(r.faculty_id);
@@ -437,6 +478,11 @@ export default function SectionsPage() {
                             <Badge variant="destructive">Inactive</Badge>
                           )}
                         </TableCell>
+                        <TableCell>
+                          <Button size="sm" variant="outline" onClick={() => openEdit(r)}>
+                            Edit
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     );
                   })
@@ -445,7 +491,24 @@ export default function SectionsPage() {
             </Table>
           )}
         </div>
+        <PaginationBar
+          page={pager.page}
+          totalPages={pager.totalPages}
+          onPageChange={pager.setPage}
+          pageSize={pager.pageSize}
+          onPageSizeChange={pager.setPageSize}
+          totalItems={pager.totalItems}
+        />
       </div>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit section</DialogTitle>
+          </DialogHeader>
+          {renderForm(() => update.mutate(), "Update")}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

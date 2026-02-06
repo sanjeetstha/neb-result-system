@@ -32,7 +32,9 @@ import App from "./App.jsx";
 import "./index.css";
 
 import { initTheme } from "./lib/theme";
+import { initAppSettings } from "./lib/appSettings";
 initTheme();
+initAppSettings();
 
 const queryClient = new QueryClient();
 

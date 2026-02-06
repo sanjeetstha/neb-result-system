@@ -1,296 +1,472 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Link } from "react-router-dom";
 
 import { api } from "../../lib/api";
+import {
+  EXAM_PRESETS,
+  applyPresetToFlatComponents,
+  buildComponentsPayloadFromFlat,
+  flattenExamGroups,
+  isSpecialOptionalSubject,
+  toNumberOrEmpty,
+} from "../../lib/examPresets";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "../../components/ui/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../../components/ui/table";
 import { Badge } from "../../components/ui/badge";
+import { Card, CardContent } from "../../components/ui/card";
+import { Separator } from "../../components/ui/separator";
 
-function norm(v) {
-  return String(v ?? "").trim();
-}
-
-function normalizeExamPayload(form) {
-  const name = norm(form.name);
-  const academic_year_id = Number(form.academic_year_id || 0);
-  const class_id = Number(form.class_id || 0);
-  const faculty_id = Number(form.faculty_id || 0);
-
-  if (!name) return { error: "Exam name is required" };
-  if (!academic_year_id) return { error: "Academic year is required" };
-  if (!class_id) return { error: "Class is required" };
-  if (!faculty_id) return { error: "Faculty is required" };
-
-  return {
-    payload: {
-      name,
-      academic_year_id,
-      class_id,
-      faculty_id,
-    },
-  };
-}
-
-export default function ExamsPage() {
+export default function ExamComponentsPage() {
+  const { examId } = useParams();
   const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
 
-  const [form, setForm] = useState({
-    name: "",
-    academic_year_id: "",
-    class_id: "",
-    faculty_id: "",
+  const [components, setComponents] = useState([]);
+  const baselineRef = useRef([]);
+
+  const [search, setSearch] = useState("");
+  const [presetKey, setPresetKey] = useState("FIRST_TERMINAL");
+  const [presetValues, setPresetValues] = useState({
+    full: EXAM_PRESETS.FIRST_TERMINAL.full,
+    optionalFull: EXAM_PRESETS.FIRST_TERMINAL.optionalFull,
+    enableIN: EXAM_PRESETS.FIRST_TERMINAL.enableIN,
+    inFull: EXAM_PRESETS.FIRST_TERMINAL.inFull,
   });
 
-  // Load exams
-  const examsQ = useQuery({
-    queryKey: ["exams", "list"],
+  const examQ = useQuery({
+    queryKey: ["exams", "components", examId],
+    enabled: !!examId,
     queryFn: async () => {
-      const res = await api.get("/api/exams");
-      const data = res.data?.exams ?? res.data?.data ?? res.data ?? [];
-      return Array.isArray(data) ? data : [];
+      const res = await api.get(`/api/exams/${examId}/components`);
+      return res.data;
     },
-    staleTime: 10_000,
   });
 
-  // Masters for select options
-  const yearsQ = useQuery({
-    queryKey: ["masters", "academic-years"],
-    queryFn: async () => {
-      const res = await api.get("/api/masters/academic-years");
-      const data = res.data?.academic_years ?? res.data?.years ?? res.data?.data ?? res.data ?? [];
-      return Array.isArray(data) ? data : [];
-    },
-    staleTime: 60_000,
-  });
+  useEffect(() => {
+    const p = EXAM_PRESETS[presetKey] || EXAM_PRESETS.FIRST_TERMINAL;
+    setPresetValues({
+      full: p.full,
+      optionalFull: p.optionalFull,
+      enableIN: p.enableIN,
+      inFull: p.inFull,
+    });
+  }, [presetKey]);
 
-  const facultiesQ = useQuery({
-    queryKey: ["masters", "faculties"],
-    queryFn: async () => {
-      const res = await api.get("/api/masters/faculties");
-      const data = res.data?.faculties ?? res.data?.data ?? res.data ?? [];
-      return Array.isArray(data) ? data : [];
-    },
-    staleTime: 60_000,
-  });
+  useEffect(() => {
+    if (!examQ.data?.groups) return;
+    const flat = flattenExamGroups(examQ.data.groups || []);
+    setComponents(flat);
+    baselineRef.current = JSON.parse(JSON.stringify(flat));
+  }, [examQ.data]);
 
-  const classesQ = useQuery({
-    queryKey: ["masters", "classes"],
-    queryFn: async () => {
-      const res = await api.get("/api/masters/classes");
-      const data = res.data?.classes ?? res.data?.data ?? res.data ?? [];
-      return Array.isArray(data) ? data : [];
-    },
-    staleTime: 60_000,
-  });
+  const exam = examQ.data?.exam || null;
+  const isLocked = !!(exam?.is_locked || exam?.published_at);
 
-  const createExam = useMutation({
+  const filtered = useMemo(() => {
+    const q = String(search || "").trim().toLowerCase();
+    if (!q) return components;
+    return components.filter((c) => {
+      const hay = [
+        c.subject_name,
+        c.component_title,
+        c.component_code,
+        c.component_type,
+        c.group_name,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [components, search]);
+
+  const grouped = useMemo(() => {
+    const map = new Map();
+    for (const c of filtered) {
+      const key = `${c.subject_id}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          subject_id: c.subject_id,
+          subject_name: c.subject_name,
+          group_name: c.group_name,
+          items: [],
+        });
+      }
+      map.get(key).items.push(c);
+    }
+    return Array.from(map.values());
+  }, [filtered]);
+
+  const updateComponent = (code, patch) => {
+    setComponents((prev) =>
+      prev.map((c) => (c.component_code === code ? { ...c, ...patch } : c))
+    );
+  };
+
+  const applyPreset = () => {
+    const full = toNumberOrEmpty(presetValues.full);
+    const optionalFull = toNumberOrEmpty(presetValues.optionalFull);
+    const inFull = toNumberOrEmpty(presetValues.inFull);
+    const enableIN = !!presetValues.enableIN;
+
+    if (full === "" || optionalFull === "") {
+      return toast.error("Full marks and optional full marks are required.");
+    }
+
+    setComponents((prev) => applyPresetToFlatComponents(prev, {
+      full,
+      optionalFull,
+      enableIN,
+      inFull,
+    }));
+
+    toast.success("Preset applied");
+  };
+
+  const resetChanges = () => {
+    setComponents(JSON.parse(JSON.stringify(baselineRef.current || [])));
+    toast.message("Changes reset");
+  };
+
+  const saveMutation = useMutation({
     mutationFn: async () => {
-      const { payload, error } = normalizeExamPayload(form);
-      if (error) throw new Error(error);
+      const invalid = components.filter(
+        (c) => c.is_enabled && !Number.isFinite(Number(c.full_marks))
+      );
+      if (invalid.length > 0) {
+        throw new Error("Full marks required for all enabled components.");
+      }
 
-      const res = await api.post("/api/exams", payload);
+      const payload = buildComponentsPayloadFromFlat(components);
+
+      const res = await api.post(`/api/exams/${examId}/components`, {
+        components: payload,
+      });
       return res.data;
     },
     onSuccess: async () => {
-      toast.success("Exam created");
-      setOpen(false);
-      setForm({ name: "", academic_year_id: "", class_id: "", faculty_id: "" });
-      await qc.invalidateQueries({ queryKey: ["exams", "list"] });
+      toast.success("Exam components saved");
+      await qc.invalidateQueries({ queryKey: ["exams", "components", examId] });
     },
     onError: (err) => {
-      toast.error(err?.response?.data?.message || err.message || "Failed to create exam");
+      toast.error(
+        err?.response?.data?.message ||
+          err?.message ||
+          "Failed to save exam components"
+      );
     },
   });
 
-  const rows = useMemo(() => {
-    const arr = examsQ.data || [];
-    return arr.map((x) => ({
-      id: x.id ?? x.exam_id ?? "",
-      name: x.name ?? x.title ?? "",
-      academic_year_id: x.academic_year_id ?? "",
-      class_id: x.class_id ?? "",
-      faculty_id: x.faculty_id ?? "",
-      is_published: !!(x.published_at || x.is_published),
-      published_at: x.published_at || null,
-      locked_at: x.locked_at || null,
-      raw: x,
-    }));
-  }, [examsQ.data]);
+  const enabledCount = useMemo(
+    () => components.filter((c) => c.is_enabled).length,
+    [components]
+  );
 
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Exams</h2>
+          <h2 className="text-lg font-semibold">Exam Components</h2>
           <p className="text-sm text-muted-foreground">
-            Create exams and configure components/full marks per exam.
+            Configure full marks and enable/disable components for this exam.
           </p>
         </div>
 
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button>Create Exam</Button>
-          </DialogTrigger>
-
-          <DialogContent className="max-w-xl">
-            <DialogHeader>
-              <DialogTitle>Create exam</DialogTitle>
-            </DialogHeader>
-
-            <div className="space-y-3">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Exam name</label>
-                <Input
-                  placeholder="e.g., Terminal 1 2082"
-                  value={form.name}
-                  onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Academic year</label>
-                  <select
-                    className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                    value={form.academic_year_id}
-                    onChange={(e) => setForm((p) => ({ ...p, academic_year_id: e.target.value }))}
-                  >
-                    <option value="">
-                      {yearsQ.isLoading ? "Loading..." : "Select year"}
-                    </option>
-                    {(yearsQ.data || []).map((y) => (
-                      <option key={y.id} value={y.id}>
-                        {y.year_bs || y.name || `Year #${y.id}`}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Class</label>
-                  <select
-                    className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                    value={form.class_id}
-                    onChange={(e) => setForm((p) => ({ ...p, class_id: e.target.value }))}
-                  >
-                    <option value="">
-                      {classesQ.isLoading ? "Loading..." : "Select class"}
-                    </option>
-                    {(classesQ.data || []).map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name || c.class_name || `Class #${c.id}`}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-2 sm:col-span-2">
-                  <label className="text-sm font-medium">Faculty / Program</label>
-                  <select
-                    className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                    value={form.faculty_id}
-                    onChange={(e) => setForm((p) => ({ ...p, faculty_id: e.target.value }))}
-                  >
-                    <option value="">
-                      {facultiesQ.isLoading ? "Loading..." : "Select faculty"}
-                    </option>
-                    {(facultiesQ.data || []).map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {(f.code ? `${f.code} — ` : "") + (f.name || `Faculty #${f.id}`)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setOpen(false)} disabled={createExam.isPending}>
-                  Cancel
-                </Button>
-                <Button onClick={() => createExam.mutate()} disabled={createExam.isPending}>
-                  {createExam.isPending ? "Saving..." : "Save"}
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <div className="flex items-center gap-2">
+          <Button asChild variant="outline" size="sm">
+            <Link to="/exams">Back to Exams</Link>
+          </Button>
+        </div>
       </div>
 
-      <div className="rounded-lg border">
-        <div className="flex items-center justify-between p-3 border-b">
-          <div className="text-sm font-medium">Exam List</div>
-          <div className="text-xs text-muted-foreground">
-            {examsQ.isLoading ? "Loading..." : `Total: ${rows.length}`}
-          </div>
-        </div>
-
-        <div className="p-3">
-          {examsQ.isError ? (
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          {examQ.isLoading ? (
+            <div className="text-sm text-muted-foreground">Loading exam...</div>
+          ) : examQ.isError ? (
             <div className="text-sm text-destructive">
-              Failed to load exams:{" "}
-              {examsQ.error?.response?.data?.message || examsQ.error?.message || "Unknown error"}
+              {examQ.error?.response?.data?.message ||
+                examQ.error?.message ||
+                "Failed to load exam"}
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[90px]">ID</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead className="w-[140px]">Status</TableHead>
-                  <TableHead className="w-[200px]">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-
-              <TableBody>
-                {rows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={4} className="text-center text-sm text-muted-foreground">
-                      {examsQ.isLoading ? "Loading..." : "No exams found."}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  rows.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell className="font-mono text-xs">{r.id}</TableCell>
-                      <TableCell className="font-medium">{r.name}</TableCell>
-                      <TableCell>
-                        {r.is_published ? (
-                          <Badge variant="secondary">Published</Badge>
-                        ) : (
-                          <Badge variant="outline">Draft</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="space-x-2">
-                        <Button asChild size="sm" variant="outline">
-                          <Link to={`/exams/${r.id}/components`}>Components</Link>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline">Exam #{exam?.id}</Badge>
+              <Badge variant="secondary">{exam?.name || "—"}</Badge>
+              {isLocked ? (
+                <Badge variant="secondary">Locked / Published</Badge>
+              ) : (
+                <Badge variant="outline">Draft</Badge>
+              )}
+              <Badge variant="outline">Components: {components.length}</Badge>
+              <Badge variant="outline">Enabled: {enabledCount}</Badge>
+            </div>
           )}
-        </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-4 space-y-4">
+          <div className="text-sm font-semibold">Terminal Preset</div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Preset</label>
+              <select
+                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                value={presetKey}
+                onChange={(e) => setPresetKey(e.target.value)}
+                disabled={isLocked}
+              >
+                {Object.entries(EXAM_PRESETS).map(([key, p]) => (
+                  <option key={key} value={key}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Full Marks (TH)</label>
+              <Input
+                type="number"
+                step="0.25"
+                value={presetValues.full}
+                onChange={(e) =>
+                  setPresetValues((p) => ({
+                    ...p,
+                    full: toNumberOrEmpty(e.target.value),
+                  }))
+                }
+                disabled={isLocked}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Optional Full Marks (Computer/Hotel)
+              </label>
+              <Input
+                type="number"
+                step="0.25"
+                value={presetValues.optionalFull}
+                onChange={(e) =>
+                  setPresetValues((p) => ({
+                    ...p,
+                    optionalFull: toNumberOrEmpty(e.target.value),
+                  }))
+                }
+                disabled={isLocked}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3 items-end">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Include Practical/Internal (IN)</label>
+              <div className="flex items-center gap-3 h-10">
+                <input
+                  type="checkbox"
+                  checked={!!presetValues.enableIN}
+                  onChange={(e) =>
+                    setPresetValues((p) => ({
+                      ...p,
+                      enableIN: e.target.checked,
+                    }))
+                  }
+                  disabled={isLocked}
+                  className="h-4 w-4"
+                />
+                <span className="text-sm text-muted-foreground">
+                  Enable IN / PR components
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Practical/Internal Full Marks</label>
+              <Input
+                type="number"
+                step="0.25"
+                value={presetValues.inFull}
+                onChange={(e) =>
+                  setPresetValues((p) => ({
+                    ...p,
+                    inFull: toNumberOrEmpty(e.target.value),
+                  }))
+                }
+                disabled={isLocked || !presetValues.enableIN}
+              />
+            </div>
+
+            <div className="flex md:justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={applyPreset}
+                disabled={isLocked || components.length === 0}
+              >
+                Apply Preset
+              </Button>
+              <Button
+                variant="outline"
+                onClick={resetChanges}
+                disabled={isLocked || components.length === 0}
+              >
+                Reset
+              </Button>
+            </div>
+          </div>
+
+          <div className="text-xs text-muted-foreground">
+            Optional overrides apply to subjects containing{" "}
+            <span className="font-medium">Computer</span> or{" "}
+            <span className="font-medium">Hotel</span> in the subject name.
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-4 space-y-4">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="text-sm font-semibold">Components</div>
+            <div className="w-full md:w-[320px]">
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search subject / code / type..."
+              />
+            </div>
+          </div>
+
+          <Separator />
+
+          {examQ.isLoading ? (
+            <div className="text-sm text-muted-foreground">Loading components...</div>
+          ) : grouped.length === 0 ? (
+            <div className="text-sm text-muted-foreground">
+              No components found for this exam.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {grouped.map((g) => (
+                <div key={g.subject_id} className="rounded-lg border">
+                  <div className="p-3 border-b flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-sm font-semibold">
+                        {g.subject_name}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        Group: {g.group_name || "—"}
+                      </div>
+                    </div>
+                    {isSpecialOptionalSubject(g.subject_name) ? (
+                      <Badge variant="secondary">Optional (Computer/Hotel)</Badge>
+                    ) : null}
+                  </div>
+
+                  <div className="p-3 space-y-3">
+                    {g.items.map((c) => (
+                      <div
+                        key={c.component_code}
+                        className="grid grid-cols-1 gap-3 md:grid-cols-6 md:items-center"
+                      >
+                        <div className="md:col-span-2">
+                          <div className="text-sm font-medium">
+                            {c.component_title || "Component"}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Code: {c.component_code} • Type: {c.component_type}
+                          </div>
+                        </div>
+
+                        <div className="md:col-span-2 grid grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted-foreground">
+                              Full Marks
+                            </label>
+                            <Input
+                              type="number"
+                              step="0.25"
+                              value={c.full_marks}
+                              onChange={(e) =>
+                                updateComponent(c.component_code, {
+                                  full_marks: toNumberOrEmpty(e.target.value),
+                                })
+                              }
+                              disabled={isLocked}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted-foreground">
+                              Pass Marks
+                            </label>
+                            <Input
+                              type="number"
+                              step="0.25"
+                              value={c.pass_marks}
+                              onChange={(e) =>
+                                updateComponent(c.component_code, {
+                                  pass_marks: toNumberOrEmpty(e.target.value),
+                                })
+                              }
+                              disabled={isLocked}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="md:col-span-1">
+                          <label className="text-xs text-muted-foreground">
+                            Enabled
+                          </label>
+                          <div className="flex items-center gap-2 h-10">
+                            <input
+                              type="checkbox"
+                              checked={!!c.is_enabled}
+                              onChange={(e) =>
+                                updateComponent(c.component_code, {
+                                  is_enabled: e.target.checked,
+                                })
+                              }
+                              disabled={isLocked}
+                              className="h-4 w-4"
+                            />
+                            <span className="text-xs text-muted-foreground">
+                              {c.is_enabled ? "Yes" : "No"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Button
+          variant="outline"
+          onClick={resetChanges}
+          disabled={isLocked || components.length === 0}
+        >
+          Reset Changes
+        </Button>
+        <Button
+          onClick={() => saveMutation.mutate()}
+          disabled={isLocked || saveMutation.isPending || components.length === 0}
+        >
+          {saveMutation.isPending ? "Saving..." : "Save Components"}
+        </Button>
       </div>
+
+      {isLocked ? (
+        <div className="text-xs text-muted-foreground">
+          Exam is locked/published. Editing is disabled.
+        </div>
+      ) : null}
     </div>
   );
 }

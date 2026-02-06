@@ -1,0 +1,4 @@
+symbol_no,component_code,marks_obtained,is_absent
+12345,1101,78,false
+12345,1102,18,false
+12346,1101,,true

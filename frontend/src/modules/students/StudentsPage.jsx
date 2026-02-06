@@ -2,10 +2,12 @@ import { useMemo, useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
+import { usePagination } from "../../lib/usePagination";
 
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Badge } from "../../components/ui/badge";
+import PaginationBar from "../../components/ui/pagination-bar";
 import {
   Dialog,
   DialogContent,
@@ -90,6 +92,17 @@ export default function StudentsPage() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileEnrollmentId, setProfileEnrollmentId] = useState(null);
 
+  // Edit dialog state
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingStudentId, setEditingStudentId] = useState(null);
+  const [editForm, setEditForm] = useState({
+    full_name: "",
+    symbol_no: "",
+    dob: "",
+    regd_no: "",
+    roll_no: "",
+  });
+
   // create form
   const [form, setForm] = useState({
     section_id: "",
@@ -100,8 +113,7 @@ export default function StudentsPage() {
     phone: "",
   });
 
-  // Optional editor state (draft choices)
-  // shape: { "Opt. 1st": 4, "Opt. 2nd": 11, ... }
+  // Optional editor state
   const [optDraft, setOptDraft] = useState({});
   const [optDirty, setOptDirty] = useState(false);
 
@@ -196,12 +208,37 @@ export default function StudentsPage() {
     },
   });
 
+  const updateStudent = useMutation({
+    mutationFn: async () => {
+      if (!editingStudentId) throw new Error("Missing student id");
+
+      const payload = {
+        full_name: norm(editForm.full_name),
+        symbol_no: norm(editForm.symbol_no),
+        dob: norm(editForm.dob),
+        regd_no: norm(editForm.regd_no) || null,
+        roll_no: norm(editForm.roll_no) || null,
+      };
+
+      const res = await api.put(`/api/students/${editingStudentId}`, payload);
+      return res.data;
+    },
+    onSuccess: async () => {
+      toast.success("Student updated");
+      setEditOpen(false);
+      setEditingStudentId(null);
+      await qc.invalidateQueries({ queryKey: ["students", "list", sectionId] });
+    },
+    onError: (err) => {
+      toast.error(err?.response?.data?.message || err.message || "Failed to update student");
+    },
+  });
+
   // save optional choices
   const saveOptionals = useMutation({
     mutationFn: async () => {
       if (!profileEnrollmentId) throw new Error("Missing enrollment id");
 
-      // turn draft into array: [{ group_name, subject_id }]
       const choices = Object.entries(optDraft)
         .filter(([, sid]) => Number(sid) > 0)
         .map(([group_name, subject_id]) => ({
@@ -211,7 +248,6 @@ export default function StudentsPage() {
 
       if (choices.length === 0) throw new Error("Select at least one optional subject");
 
-      // Send both keys for compatibility with backend parsers
       const payload = { choices, optional_choices: choices };
 
       const res = await api.post(`/api/students/${profileEnrollmentId}/optional-choices`, payload);
@@ -235,10 +271,14 @@ export default function StudentsPage() {
       full_name: x.full_name ?? x.name ?? "",
       symbol_no: x.symbol_no ?? x.symbol ?? "",
       dob: x.dob ?? "",
+      regd_no: x.regd_no ?? "",
+      roll_no: x.roll_no ?? "",
       is_active: Number(x.is_active ?? 1) === 1,
       raw: x,
     }));
   }, [studentsQ.data]);
+
+  const pager = usePagination(rows, 20);
 
   // When profile loads, initialize optDraft from server optional_choices
   useEffect(() => {
@@ -255,9 +295,7 @@ export default function StudentsPage() {
     setOptDirty(false);
   }, [profileOpen, profileQ.data]);
 
-  // Build optional groups/options from catalog (best), fallback to profile optional_subjects
   const optionalGroups = useMemo(() => {
-    // catalog possible shapes
     const raw =
       catalogQ.data?.catalog_groups ||
       catalogQ.data?.groups ||
@@ -267,7 +305,6 @@ export default function StudentsPage() {
 
     const groups = Array.isArray(raw) ? raw : [];
 
-    // normalize to: [{ group_name, subjects:[{id,name,code}] }]
     const normalizedFromCatalog = groups
       .map((g) => {
         const group_name = g.group_name || g.name || g.title || "";
@@ -284,7 +321,6 @@ export default function StudentsPage() {
 
     if (normalizedFromCatalog.length > 0) return normalizedFromCatalog;
 
-    // fallback: use current optional_choices groups and allow selecting among currently-returned optional_subjects
     const choiceGroups = (profileQ.data?.optional_choices || [])
       .map((c) => c.group_name)
       .filter(Boolean);
@@ -294,7 +330,6 @@ export default function StudentsPage() {
     const fallbackSubjects = (profileQ.data?.optional_subjects || []).map((s) => ({
       id: s.id,
       name: s.name,
-      // try to compute a display code from first component code if present
       code: s.components?.[0]?.component_code || "",
     }));
 
@@ -305,6 +340,18 @@ export default function StudentsPage() {
   }, [catalogQ.data, profileQ.data, profileQ.data?.optional_choices]);
 
   const enrollment = profileQ.data?.enrollment;
+
+  const openEdit = (r) => {
+    setEditingStudentId(r.id);
+    setEditForm({
+      full_name: r.full_name || "",
+      symbol_no: r.symbol_no || "",
+      dob: String(r.dob || "").slice(0, 10),
+      regd_no: r.regd_no || "",
+      roll_no: r.roll_no || "",
+    });
+    setEditOpen(true);
+  };
 
   return (
     <div className="space-y-4">
@@ -435,19 +482,19 @@ export default function StudentsPage() {
                   <TableHead className="w-[140px]">Symbol No</TableHead>
                   <TableHead className="w-[140px]">DOB</TableHead>
                   <TableHead className="w-[120px]">Status</TableHead>
-                  <TableHead className="w-[140px]">Actions</TableHead>
+                  <TableHead className="w-[200px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
 
               <TableBody>
-                {rows.length === 0 ? (
+                {pager.pageItems.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
                       {studentsQ.isLoading ? "Loading..." : "No students found."}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rows.map((r) => (
+                  pager.pageItems.map((r) => (
                     <TableRow key={r.id || r.symbol_no}>
                       <TableCell className="font-mono text-xs">{r.id}</TableCell>
                       <TableCell className="font-medium">{r.full_name}</TableCell>
@@ -456,7 +503,14 @@ export default function StudentsPage() {
                       <TableCell>
                         {r.is_active ? <Badge variant="secondary">Active</Badge> : <Badge variant="destructive">Inactive</Badge>}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openEdit(r)}
+                        >
+                          Edit
+                        </Button>
                         <Button
                           size="sm"
                           variant="outline"
@@ -476,7 +530,73 @@ export default function StudentsPage() {
             </Table>
           )}
         </div>
+        <PaginationBar
+          page={pager.page}
+          totalPages={pager.totalPages}
+          onPageChange={pager.setPage}
+          pageSize={pager.pageSize}
+          onPageSizeChange={pager.setPageSize}
+          totalItems={pager.totalItems}
+        />
       </div>
+
+      {/* Edit Dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit student</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-2 sm:col-span-2">
+                <label className="text-sm font-medium">Full name</label>
+                <Input
+                  value={editForm.full_name}
+                  onChange={(e) => setEditForm((p) => ({ ...p, full_name: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Symbol no</label>
+                <Input
+                  value={editForm.symbol_no}
+                  onChange={(e) => setEditForm((p) => ({ ...p, symbol_no: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">DOB</label>
+                <Input
+                  type="date"
+                  value={editForm.dob}
+                  onChange={(e) => setEditForm((p) => ({ ...p, dob: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Regd No</label>
+                <Input
+                  value={editForm.regd_no}
+                  onChange={(e) => setEditForm((p) => ({ ...p, regd_no: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Roll No</label>
+                <Input
+                  value={editForm.roll_no}
+                  onChange={(e) => setEditForm((p) => ({ ...p, roll_no: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={() => updateStudent.mutate()} disabled={updateStudent.isPending}>
+                {updateStudent.isPending ? "Saving..." : "Update"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Profile Dialog */}
       <Dialog
@@ -518,143 +638,80 @@ export default function StudentsPage() {
                   </div>
                   <div className="text-sm">
                     <span className="text-muted-foreground">Class ID: </span>
-                    <span className="font-mono">{enrollment?.class_id ?? "—"}</span>
+                    <span className="font-medium">{enrollment?.class_id || "—"}</span>
                   </div>
                   <div className="text-sm">
-                    <span className="text-muted-foreground">Academic Year ID: </span>
-                    <span className="font-mono">{enrollment?.academic_year_id ?? "—"}</span>
+                    <span className="text-muted-foreground">Faculty ID: </span>
+                    <span className="font-medium">{enrollment?.faculty_id || "—"}</span>
                   </div>
                 </div>
               </div>
 
-              {/* Compulsory subjects */}
+              {/* Compulsory */}
               <div className="rounded-lg border p-3">
                 <div className="text-sm font-medium">Compulsory Subjects</div>
-                <div className="mt-2 space-y-2">
-                  {(profileQ.data?.compulsory_subjects || []).map((s) => (
-                    <div key={s.id} className="rounded-md border p-2">
-                      <div className="font-medium text-sm">{s.name}</div>
-                      <div className="mt-1 flex flex-wrap gap-2">
-                        {(s.components || []).map((c) => (
-                          <span
-                            key={c.component_code}
-                            className="rounded-md border px-2 py-1 text-xs font-mono"
-                            title={c.component_title}
-                          >
-                            {pad4(c.component_code)} ({c.component_type})
-                          </span>
-                        ))}
+                {profileQ.data?.compulsory_subjects?.length ? (
+                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {profileQ.data.compulsory_subjects.map((s) => (
+                      <div key={s.id} className="text-sm">
+                        {s.name}
+                        {s.components?.length ? (
+                          <div className="text-xs text-muted-foreground mt-1">
+                            {s.components
+                              .map((c) => `${c.component_type} ${pad4(c.component_code)}`)
+                              .join(" • ")}
+                          </div>
+                        ) : null}
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground mt-2">No compulsory subjects.</div>
+                )}
               </div>
 
-              {/* Optional subjects editor */}
+              {/* Optional */}
               <div className="rounded-lg border p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <div className="text-sm font-medium">Optional Subjects</div>
-                    <div className="text-xs text-muted-foreground">
-                      You can change optionals anytime (until exam is locked/published by backend rules).
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-medium">Optional Subjects</div>
+                  {optDirty ? <Badge variant="outline">Unsaved</Badge> : null}
+                </div>
+
+                {optionalGroups.length === 0 ? (
+                  <div className="text-sm text-muted-foreground mt-2">No optional groups found.</div>
+                ) : (
+                  <div className="mt-3 space-y-3">
+                    {optionalGroups.map((g) => (
+                      <div key={g.group_name} className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <div className="text-sm font-medium">{g.group_name}</div>
+                        <select
+                          className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                          value={String(optDraft[g.group_name] || "")}
+                          onChange={(e) => {
+                            setOptDraft((p) => ({ ...p, [g.group_name]: e.target.value }));
+                            setOptDirty(true);
+                          }}
+                        >
+                          <option value="">Select subject</option>
+                          {g.subjects.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.name} {s.code ? `(${pad4(s.code)})` : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => setOptDirty(false)}>
+                        Reset
+                      </Button>
+                      <Button onClick={() => saveOptionals.mutate()} disabled={saveOptionals.isPending}>
+                        {saveOptionals.isPending ? "Saving..." : "Save Optional"}
+                      </Button>
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      disabled={!optDirty || saveOptionals.isPending}
-                      onClick={() => {
-                        // reset to server values
-                        const serverChoices = profileQ.data?.optional_choices || [];
-                        const draft = {};
-                        for (const c of serverChoices) {
-                          draft[c.group_name] = Number(c.subject_id) || "";
-                        }
-                        setOptDraft(draft);
-                        setOptDirty(false);
-                      }}
-                    >
-                      Reset
-                    </Button>
-
-                    <Button
-                      disabled={saveOptionals.isPending || !optDirty}
-                      onClick={() => saveOptionals.mutate()}
-                    >
-                      {saveOptionals.isPending ? "Saving..." : "Save Optionals"}
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-                  {optionalGroups.length === 0 ? (
-                    <div className="text-sm text-muted-foreground">
-                      No optional groups found. (Check subject-catalog response)
-                    </div>
-                  ) : (
-                    optionalGroups.map((g) => {
-                      const current = optDraft[g.group_name] ?? "";
-                      const opts = (g.subjects || []).map((s) => ({
-                        value: String(s.id),
-                        label: `${s.name}${s.code ? ` (${pad4(s.code)})` : ""}`,
-                      }));
-
-                      return (
-                        <div key={g.group_name} className="rounded-md border p-3">
-                          <div className="text-sm font-medium">{g.group_name}</div>
-                          <div className="mt-2">
-                            <select
-                              className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                              value={String(current || "")}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setOptDraft((p) => ({ ...p, [g.group_name]: v }));
-                                setOptDirty(true);
-                              }}
-                            >
-                              <option value="">Select subject</option>
-                              {opts.map((o) => (
-                                <option key={o.value} value={o.value}>
-                                  {o.label}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-
-                {/* Current selected optionals from server */}
-                <div className="mt-4">
-                  <div className="text-sm font-medium">Currently saved optionals</div>
-                  <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
-                    {(profileQ.data?.optional_choices || []).map((c) => {
-                      const subj =
-                        (profileQ.data?.optional_subjects || []).find((x) => x.id === c.subject_id) || null;
-                      return (
-                        <div key={`${c.group_name}-${c.subject_id}`} className="rounded-md border p-2">
-                          <div className="text-xs text-muted-foreground">{c.group_name}</div>
-                          <div className="text-sm font-medium">{subj?.name || `Subject #${c.subject_id}`}</div>
-                        </div>
-                      );
-                    })}
-                    {(profileQ.data?.optional_choices || []).length === 0 && (
-                      <div className="text-sm text-muted-foreground">—</div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Catalog status */}
-                <div className="mt-3 text-xs text-muted-foreground">
-                  {catalogQ.isLoading
-                    ? "Loading subject catalog..."
-                    : catalogQ.isError
-                    ? "Catalog load failed (using fallback list)."
-                    : "Catalog loaded."}
-                </div>
+                )}
               </div>
             </div>
           )}

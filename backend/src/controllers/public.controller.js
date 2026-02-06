@@ -7,12 +7,13 @@ function norm(s) {
 async function listPublishedExams(req, res) {
   const [rows] = await db.query(
     `SELECT e.id AS exam_id, e.name, e.exam_type, e.published_at,
-            c.name AS campus, ay.year_bs AS academic_year, cl.name AS class, f.name AS faculty
+            c.name AS campus, ay.year_bs AS academic_year, cl.name AS class,
+            COALESCE(f.name, 'All Faculties') AS faculty
      FROM exams e
      JOIN campuses c ON c.id=e.campus_id
      JOIN academic_years ay ON ay.id=e.academic_year_id
      JOIN classes cl ON cl.id=e.class_id
-     JOIN faculties f ON f.id=e.faculty_id
+     LEFT JOIN faculties f ON f.id=e.faculty_id
      WHERE e.published_at IS NOT NULL AND e.is_locked=1
      ORDER BY e.published_at DESC, e.id DESC`
   );

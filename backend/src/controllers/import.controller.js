@@ -46,13 +46,18 @@ async function importMarks(req, res) {
   }
 
   // 3) Load symbol_no -> enrollment_id map (for this exam's campus/year/class/faculty)
-  const [enrollRows] = await db.query(
+  let enrollSql =
     `SELECT e.id AS enrollment_id, s.symbol_no
      FROM student_enrollments e
      JOIN students s ON s.id=e.student_id
-     WHERE e.campus_id=? AND e.academic_year_id=? AND e.class_id=? AND e.faculty_id=?`,
-    [exam.campus_id, exam.academic_year_id, exam.class_id, exam.faculty_id]
-  );
+     WHERE e.campus_id=? AND e.academic_year_id=? AND e.class_id=?`;
+  const enrollParams = [exam.campus_id, exam.academic_year_id, exam.class_id];
+  if (exam.faculty_id) {
+    enrollSql += ` AND e.faculty_id=?`;
+    enrollParams.push(exam.faculty_id);
+  }
+
+  const [enrollRows] = await db.query(enrollSql, enrollParams);
   const enrollmentBySymbol = new Map();
   for (const r of enrollRows) {
     if (r.symbol_no) enrollmentBySymbol.set(String(r.symbol_no).trim(), Number(r.enrollment_id));

@@ -17,7 +17,8 @@ const importRoutes = require("./routes/import.routes");
 const publicRoutes = require("./routes/public.routes");
 const exportRoutes = require("./routes/export.routes");
 const inviteRoutes = require("./routes/invites.routes");
-const invitesRoutes = require("./routes/invites.routes");
+const usersRoutes = require("./routes/users.routes");
+const smsRoutes = require("./routes/sms.routes");
 
 app.use(helmet());
 app.use(cors());
@@ -38,7 +39,8 @@ app.use("/api/import", importRoutes);
 app.use("/api/public", publicRoutes);
 app.use("/api/exports", exportRoutes);
 app.use("/api/invites", inviteRoutes);
-app.use("/api/invites", invitesRoutes);
+app.use("/api/users", usersRoutes);
+app.use("/api/sms", smsRoutes);
 
 
 app.get("/api/health", async (req, res) => {

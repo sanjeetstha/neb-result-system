@@ -2,8 +2,6 @@ import { Outlet } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import { NavLink } from "react-router-dom";
-
 import Sidebar from "../components/sidebar/Sidebar";
 import Topbar from "../components/topbar/Topbar";
 import { useMe, logoutHard } from "../lib/useMe";
@@ -87,23 +85,14 @@ export default function DashboardLayout() {
         </Sheet>
 
         {/* Main content area (ONLY this scrolls vertically) */}
-        <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6">
-          <div className="rounded-lg border p-4">
+        <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 bg-gradient-to-br from-muted/30 via-background to-background">
+          <div className="rounded-2xl border bg-card/80 backdrop-blur p-4 md:p-6 shadow-sm">
             {isLoading ? (
               <div className="text-sm text-muted-foreground">Loading...</div>
             ) : (
               <Outlet />
             )}
           </div>
-
-          {/* Debug (remove later) */}
-          <pre className="text-xs mt-4 bg-muted p-3 rounded-md overflow-auto">
-            {JSON.stringify(
-              { me, apiBase: import.meta.env.VITE_API_BASE_URL },
-              null,
-              2
-            )}
-          </pre>
         </main>
       </div>
     </div>

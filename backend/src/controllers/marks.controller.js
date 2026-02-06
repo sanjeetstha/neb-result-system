@@ -18,7 +18,16 @@ async function upsertMarks(req, res) {
 
     const code = String(m.component_code);
     const is_absent = m.is_absent ? 1 : 0;
-    const obtained = is_absent ? null : (m.marks_obtained != null ? Number(m.marks_obtained) : null);
+    const raw =
+      m.marks_obtained != null
+        ? m.marks_obtained
+        : m.marks != null
+        ? m.marks
+        : m.obtained != null
+        ? m.obtained
+        : m.value;
+    const obtained =
+      is_absent || raw == null || raw === "" ? null : Number(raw);
 
     await db.query(
       `INSERT INTO marks (exam_id, enrollment_id, component_code, marks_obtained, is_absent, entered_by, entered_at, updated_by, updated_at)

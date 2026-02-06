@@ -105,7 +105,7 @@ async function fetchExamHeader(exam_id) {
      FROM exams e
      JOIN academic_years ay ON ay.id=e.academic_year_id
      JOIN classes cl ON cl.id=e.class_id
-     JOIN faculties f ON f.id=e.faculty_id
+     LEFT JOIN faculties f ON f.id=e.faculty_id
      JOIN campuses c ON c.id=e.campus_id
      WHERE e.id=? LIMIT 1`,
     [exam_id]
@@ -129,6 +129,24 @@ async function fetchSubjectCodeMap(subjectIds) {
 
   for (const x of rows) {
     map.set(Number(x.subject_id), x.th_code || x.any_code || "");
+  }
+  return map;
+}
+
+async function fetchSubjectCreditMap(subjectIds) {
+  const map = new Map();
+  if (!subjectIds || subjectIds.length === 0) return map;
+
+  const [rows] = await db.query(
+    `SELECT subject_id, SUM(credit_hour) AS total_credit
+     FROM subject_components
+     WHERE subject_id IN (?)
+     GROUP BY subject_id`,
+    [subjectIds]
+  );
+
+  for (const x of rows) {
+    map.set(Number(x.subject_id), Number(x.total_credit || 0));
   }
   return map;
 }
@@ -276,12 +294,13 @@ async function buildMarksheetComponentRows(exam_id, enrollment_id, rules) {
 }
 
 // --------------- SYNC renderer (NO await inside) ----------------
-function renderMarksheetDoc(doc, r, payload, exam_id, ex, codeBySubject) {
+function renderMarksheetDoc(doc, r, payload, exam_id, ex, codeBySubject, creditBySubject) {
   const logoPath = path.join(__dirname, "../../assets/logo_for_neb.png");
-  const signExamPath = path.join(__dirname, "../../assets/sign_exam.png");
-  const signPrincipalPath = path.join(__dirname, "../../assets/sign_principal.png");
 
   const subjects = payload?.subjects || [];
+
+  // Outer border
+  doc.lineWidth(1).rect(30, 25, 535, 785).stroke();
 
   // Header
   safeImage(doc, logoPath, 45, 35, { width: 60 });
@@ -304,26 +323,23 @@ function renderMarksheetDoc(doc, r, payload, exam_id, ex, codeBySubject) {
 
   doc.moveDown(0.3);
   doc.font("Helvetica-Bold").fontSize(13).text("GRADE-SHEET", { align: "center" });
-  doc.moveDown(0.8);
-
-  // Student block
-  doc.font("Helvetica-Bold").fontSize(12).text(r.full_name, { align: "center" });
+  const gradeLineY = doc.y + 2;
+  doc.moveTo(250, gradeLineY).lineTo(345, gradeLineY).stroke();
   doc.moveDown(0.6);
 
-  const leftX = 55;
-  const rightX = 330;
-  const y0 = doc.y;
+  const leftX = 50;
+  const rightX = 320;
+  const y0 = doc.y + 4;
+  const dobAd = r.dob ? new Date(r.dob).toISOString().slice(0, 10) : "";
 
   doc.font("Helvetica").fontSize(10);
   doc.text("THE GRADE(S) SECURED BY:", leftX, y0);
-  doc.text(
-    `DATE OF BIRTH:  A.D. (${new Date(r.dob).toISOString().slice(0, 10)})`,
-    leftX,
-    y0 + 14
-  );
-  doc.text(`REGISTRATION NO.: ${r.regd_no || ""}`, leftX, y0 + 28);
+  doc.font("Helvetica-Bold").text(r.full_name || "", leftX + 165, y0);
+  doc.font("Helvetica").fontSize(10);
 
-  doc.text(`SYMBOL NO.: ${r.symbol_no}`, rightX, y0 + 28);
+  doc.text(`DATE OF BIRTH: ${"—"}  B.S.  ( ${dobAd}  A.D. )`, leftX, y0 + 14);
+  doc.text(`REGISTRATION NO.: ${r.regd_no || ""}`, leftX, y0 + 28);
+  doc.text(`SYMBOL NO.: ${r.symbol_no || ""}`, rightX, y0 + 28);
   doc.text(`GRADE : ${ex?.class_name || ""}`, rightX, y0 + 42);
 
   const yearBS = ex?.year_bs || "";
@@ -334,79 +350,126 @@ function renderMarksheetDoc(doc, r, payload, exam_id, ex, codeBySubject) {
     y0 + 56
   );
 
-  doc.moveDown(2);
-
-  // Table header
+  // Table layout
   const startX = 45;
-  let y = doc.y;
+  const tableWidth = 520;
+  const headerH = 28;
+  const rowH = 18;
+  const gpaRowH = 18;
+  const minRows = 12;
+  const rows = Math.max(subjects.length, minRows);
 
-  const cSN = startX;
-  const cCode = 75;
-  const cSub = 125;
-  const cCH = 340;
-  const cGP = 410;
-  const cGrade = 470;
-  const cRemark = 515;
+  const colWidths = [25, 60, 180, 55, 55, 45, 55, 45]; // total 520
+  const colX = colWidths.reduce(
+    (acc, w, i) => (acc.push(i === 0 ? startX : acc[i - 1] + colWidths[i - 1]), acc),
+    []
+  );
 
+  let y = y0 + 80;
+
+  const tableHeight = headerH + rows * rowH + gpaRowH;
+  doc.rect(startX, y, tableWidth, tableHeight).stroke();
+
+  // Vertical lines
+  let vx = startX;
+  for (const w of colWidths) {
+    vx += w;
+    doc.moveTo(vx, y).lineTo(vx, y + tableHeight).stroke();
+  }
+
+  // Header row
   doc.font("Helvetica-Bold").fontSize(9);
-  doc.text("SN", cSN, y);
-  doc.text("Subject\nCode", cCode, y);
-  doc.text("SUBJECTS", cSub, y);
-  doc.text("CREDIT\nHOUR(CH)", cCH, y);
-  doc.text("GRADE\nPOINT(GP)", cGP, y);
-  doc.text("GRADE", cGrade, y);
-  doc.text("REMARKS", cRemark, y);
+  doc.text("SN", colX[0] + 6, y + 8);
+  doc.text("Subject Code", colX[1] + 4, y + 6, { width: colWidths[1] - 8, align: "center" });
+  doc.text("SUBJECTS", colX[2] + 4, y + 8);
+  doc.text("CREDIT\nHOUR (CH)", colX[3] + 2, y + 4, { width: colWidths[3] - 4, align: "center" });
+  doc.text("GRADE\nPOINT (GP)", colX[4] + 2, y + 4, { width: colWidths[4] - 4, align: "center" });
+  doc.text("GRADE", colX[5] + 2, y + 8, { width: colWidths[5] - 4, align: "center" });
+  doc.text("FINAL\nGRADE (FG)", colX[6] + 2, y + 4, { width: colWidths[6] - 4, align: "center" });
+  doc.text("REMARKS", colX[7] + 2, y + 8, { width: colWidths[7] - 4, align: "center" });
 
-  y += 28;
-  doc.moveTo(startX, y).lineTo(565, y).stroke();
-  y += 6;
+  // Header line
+  doc.moveTo(startX, y + headerH).lineTo(startX + tableWidth, y + headerH).stroke();
 
   // Rows
   doc.font("Helvetica").fontSize(9);
-  let sn = 1;
+  for (let i = 0; i < rows; i++) {
+    const rowY = y + headerH + i * rowH;
+    doc.moveTo(startX, rowY + rowH).lineTo(startX + tableWidth, rowY + rowH).stroke();
 
-  for (const s of subjects) {
+    doc.text(String(i + 1), colX[0] + 6, rowY + 5);
+
+    const s = subjects[i];
+    if (!s) continue;
+
     const subjId = Number(s.subject_id);
     const code = codeBySubject.get(subjId) || "";
+    const credit = creditBySubject?.get(subjId);
 
-    doc.text(String(sn), cSN, y);
-    doc.text(padCode(code), cCode, y);
-    doc.text(String(s.subject_name || ""), cSub, y, { width: 205 });
-
-    doc.text("", cCH, y); // credit totals later
-    doc.text(String(s.gpa ?? ""), cGP, y);
-    doc.text(String(s.grade ?? ""), cGrade, y);
-    doc.text(s.status === "PASS" ? "" : String(s.status || ""), cRemark, y);
-
-    y += 16;
-    sn++;
-
-    if (y > 650) {
-      doc.addPage();
-      y = 60;
-    }
+    doc.text(padCode(code), colX[1] + 4, rowY + 5, { width: colWidths[1] - 8, align: "center" });
+    doc.text(String(s.subject_name || ""), colX[2] + 4, rowY + 5, {
+      width: colWidths[2] - 8,
+    });
+    doc.text(credit != null && !Number.isNaN(credit) ? String(credit) : "", colX[3] + 2, rowY + 5, {
+      width: colWidths[3] - 4,
+      align: "center",
+    });
+    doc.text(
+      s.gpa != null && s.gpa !== "" ? Number(s.gpa).toFixed(2) : "",
+      colX[4] + 2,
+      rowY + 5,
+      { width: colWidths[4] - 4, align: "center" }
+    );
+    doc.text(String(s.grade ?? ""), colX[5] + 2, rowY + 5, { width: colWidths[5] - 4, align: "center" });
+    doc.text(String(s.final_grade ?? s.grade ?? ""), colX[6] + 2, rowY + 5, { width: colWidths[6] - 4, align: "center" });
+    doc.text(s.status === "PASS" ? "" : String(s.status || ""), colX[7] + 2, rowY + 5, { width: colWidths[7] - 4, align: "center" });
   }
 
-  // Summary
-  y += 8;
-  doc.moveTo(startX, y).lineTo(565, y).stroke();
-  y += 12;
+  // GPA row
+  const gpaY = y + headerH + rows * rowH;
+  doc.font("Helvetica-Bold").fontSize(9);
+  doc.text("Grade Point Average (GPA):", colX[3] + 10, gpaY + 5, { width: 200 });
+  doc.text(
+    Number(r.overall_gpa || payload?.overall_gpa || 0).toFixed(2),
+    colX[6] + 2,
+    gpaY + 5,
+    { width: colWidths[6] - 4, align: "center" }
+  );
 
-  doc.font("Helvetica-Bold").fontSize(10);
-  doc.text("Grade Point Average (GPA):", 320, y);
-  doc.text(Number(r.overall_gpa).toFixed(2), 490, y);
+  // Extra credit section
+  let yExtra = y + tableHeight + 10;
+  doc.font("Helvetica-Bold").fontSize(9).text("EXTRA CREDIT SUBJECT", startX + 2, yExtra);
+  yExtra += 8;
+  const extraRows = 2;
+  const extraHeight = extraRows * rowH;
+  doc.rect(startX, yExtra, tableWidth, extraHeight).stroke();
+  vx = startX;
+  for (const w of colWidths) {
+    vx += w;
+    doc.moveTo(vx, yExtra).lineTo(vx, yExtra + extraHeight).stroke();
+  }
+  for (let i = 0; i < extraRows; i++) {
+    const rowY = yExtra + i * rowH;
+    doc.moveTo(startX, rowY + rowH).lineTo(startX + tableWidth, rowY + rowH).stroke();
+    doc.font("Helvetica").fontSize(9);
+    doc.text(String(rows + i + 1), colX[0] + 6, rowY + 5);
+  }
 
-  // Footer + signatures + notes
-  const ySig = 705;
+  // Signatures
+  const ySig = yExtra + extraHeight + 30;
+  doc.font("Helvetica-Bold").fontSize(9).text("PREPARED BY:", 60, ySig);
+  doc.moveTo(135, ySig + 12).lineTo(290, ySig + 12).stroke();
 
-  doc.font("Helvetica-Bold").fontSize(9).text("PREPARED BY:", 70, ySig);
-  safeImage(doc, signExamPath, 60, ySig + 12, { width: 120 });
+  doc.font("Helvetica-Bold").fontSize(9).text("CHECKED BY:", 320, ySig);
+  doc.moveTo(395, ySig + 12).lineTo(535, ySig + 12).stroke();
 
-  doc.font("Helvetica-Bold").fontSize(9).text("CHECKED BY:", 380, ySig);
-  doc.font("Helvetica-Bold").fontSize(9).text("CAMPUS CHIEF", 380, ySig + 12);
-  safeImage(doc, signPrincipalPath, 360, ySig + 28, { width: 140 });
+  const yIssue = ySig + 32;
+  doc.font("Helvetica-Bold").fontSize(9).text("DATE OF ISSUE:", 60, yIssue);
+  doc.moveTo(150, yIssue + 10).lineTo(290, yIssue + 10).stroke();
+  doc.font("Helvetica").fontSize(9).text(`${yearBS ? yearBS : ""}  B.S.`, 190, yIssue + 12);
+  doc.font("Helvetica-Bold").fontSize(9).text("CAMPUS CHIEF", 380, yIssue + 10);
 
-  const yNote = 760;
+  const yNote = yIssue + 28;
   doc.font("Helvetica").fontSize(7);
   doc.text("NOTE : ONE CREDIT HOUR EQUALS TO 32 WORKING HOURS", 45, yNote);
   doc.text(
@@ -437,6 +500,7 @@ async function marksheetPdf(req, res) {
     const subjects = found.payload?.subjects || [];
     const subjectIds = subjects.map((s) => Number(s.subject_id)).filter(Boolean);
     const codeBySubject = await fetchSubjectCodeMap(subjectIds);
+    const creditBySubject = await fetchSubjectCreditMap(subjectIds);
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="marksheet_${symbol_no}.pdf"`);
@@ -451,7 +515,7 @@ async function marksheetPdf(req, res) {
       return;
     }
 
-    renderMarksheetDoc(doc, found.row, found.payload, exam_id, ex, codeBySubject);
+    renderMarksheetDoc(doc, found.row, found.payload, exam_id, ex, codeBySubject, creditBySubject);
     doc.end();
     cleanup();
   } catch (err) {
@@ -484,6 +548,7 @@ async function marksheetJpg(req, res) {
     const subjects = found.payload?.subjects || [];
     const subjectIds = subjects.map((s) => Number(s.subject_id)).filter(Boolean);
     const codeBySubject = await fetchSubjectCodeMap(subjectIds);
+    const creditBySubject = await fetchSubjectCreditMap(subjectIds);
 
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "neb-"));
     const pdfPath = path.join(tmpDir, `marksheet_${symbol_no}_${exam_id}.pdf`);
@@ -499,7 +564,7 @@ async function marksheetJpg(req, res) {
       doc.on("error", reject);
 
       doc.pipe(ws);
-      renderMarksheetDoc(doc, found.row, found.payload, exam_id, ex, codeBySubject);
+      renderMarksheetDoc(doc, found.row, found.payload, exam_id, ex, codeBySubject, creditBySubject);
       doc.end();
     });
 

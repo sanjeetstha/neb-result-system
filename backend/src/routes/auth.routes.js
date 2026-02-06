@@ -20,6 +20,8 @@ const authController = require("../controllers/auth.controller");
 router.post("/bootstrap-super-admin", authController.bootstrapSuperAdmin);
 router.post("/login", authController.login);
 router.post("/create-user", authController.createUser);
+router.post("/forgot-password", authController.forgotPassword);
+router.post("/reset-password", authController.resetPassword);
 
 // public (invite accept)
 router.post("/accept-invite", authController.acceptInvite);

@@ -53,6 +53,31 @@ async function listStudents(req, res) {
   res.json({ ok: true, students: rows });
 }
 
+async function updateStudent(req, res) {
+  const id = Number(req.params.studentId);
+  if (!id) return res.status(400).json({ ok: false, message: "Invalid student id" });
+
+  const { full_name, dob, symbol_no, regd_no, roll_no } = req.body || {};
+  if (!full_name || !symbol_no) {
+    return res.status(400).json({ ok: false, message: "full_name and symbol_no required" });
+  }
+
+  try {
+    await db.query(
+      `UPDATE students
+       SET full_name=?, dob=?, symbol_no=?, regd_no=?, roll_no=?
+       WHERE id=?`,
+      [full_name, dob || null, symbol_no, regd_no || null, roll_no || null, id]
+    );
+    res.json({ ok: true, message: "Student updated" });
+  } catch (e) {
+    if (String(e.message).toLowerCase().includes("duplicate")) {
+      return res.status(409).json({ ok: false, message: "Duplicate student record" });
+    }
+    res.status(500).json({ ok: false, message: "Server error" });
+  }
+}
+
 async function setOptionalChoices(req, res) {
   const enrollmentId = Number(req.params.enrollmentId);
   const { choices } = req.body || {};
@@ -157,4 +182,4 @@ async function getStudentProfile(req, res) {
 
 
 
-module.exports = { createStudent, listStudents, setOptionalChoices, getStudentProfile };
+module.exports = { createStudent, listStudents, updateStudent, setOptionalChoices, getStudentProfile };

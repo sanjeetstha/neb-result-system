@@ -56,6 +56,11 @@ export default function MarksEntryPage() {
 
   // editable marks map: { component_code: value }
   const [marks, setMarks] = useState({});
+  const [ledgerQuery, setLedgerQuery] = useState("");
+
+  // optional subjects (per-student)
+  const [optDraft, setOptDraft] = useState({});
+  const [optDirty, setOptDirty] = useState(false);
 
   // ----------------- LOAD EXAMS -----------------
   const examsQ = useQuery({
@@ -132,6 +137,32 @@ export default function MarksEntryPage() {
     }).filter((x) => x.value);
   }, [studentsQ.data]);
 
+  // ----------------- STUDENT PROFILE + OPTIONALS -----------------
+  const profileQ = useQuery({
+    queryKey: ["students", "profile", enrollmentId],
+    enabled: !!enrollmentId,
+    queryFn: async () => {
+      const res = await api.get(`/api/students/${enrollmentId}/profile`);
+      return res.data;
+    },
+    staleTime: 10_000,
+  });
+
+  const catalogQ = useQuery({
+    queryKey: ["masters", "subject-catalog", enrollmentId],
+    enabled: !!enrollmentId && !!profileQ.data?.enrollment,
+    queryFn: async () => {
+      const e = profileQ.data.enrollment;
+      const academic_year_id = e.academic_year_id;
+      const class_id = e.class_id;
+      const res = await api.get(
+        `/api/masters/subject-catalog?academic_year_id=${encodeURIComponent(academic_year_id)}&class_id=${encodeURIComponent(class_id)}`
+      );
+      return res.data;
+    },
+    staleTime: 30_000,
+  });
+
   // reset enrollment if section changed
   useEffect(() => {
     setEnrollmentId("");
@@ -141,7 +172,28 @@ export default function MarksEntryPage() {
   // reset marks if exam changed
   useEffect(() => {
     setMarks({});
+    setLedgerQuery("");
   }, [examId]);
+
+  useEffect(() => {
+    if (!enrollmentId) {
+      setOptDraft({});
+      setOptDirty(false);
+    }
+  }, [enrollmentId]);
+
+  // init optional choices when profile loads
+  useEffect(() => {
+    if (!profileQ.data?.ok) return;
+    const serverChoices = profileQ.data.optional_choices || [];
+    const draft = {};
+    for (const c of serverChoices) {
+      if (!c?.group_name) continue;
+      draft[c.group_name] = Number(c.subject_id) || "";
+    }
+    setOptDraft(draft);
+    setOptDirty(false);
+  }, [profileQ.data]);
 
   // ----------------- LOAD LEDGER -----------------
   const ledgerQ = useQuery({
@@ -174,6 +226,22 @@ export default function MarksEntryPage() {
       raw: r,
     })).filter((x) => x.component_code);
   }, [ledgerQ.data]);
+
+  const filteredLedgerRows = useMemo(() => {
+    const q = String(ledgerQuery || "").trim().toLowerCase();
+    if (!q) return ledgerRows;
+    return ledgerRows.filter((r) => {
+      const hay = [
+        r.subject_name,
+        r.component_title,
+        r.component_code,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [ledgerRows, ledgerQuery]);
 
   // When ledger loads, initialize marks state
   useEffect(() => {
@@ -214,6 +282,34 @@ export default function MarksEntryPage() {
     },
     onError: (err) => {
       toast.error(err?.response?.data?.message || err.message || "Failed to save marks");
+    },
+  });
+
+  const saveOptionals = useMutation({
+    mutationFn: async () => {
+      if (!enrollmentId) throw new Error("Missing enrollment id");
+
+      const choices = Object.entries(optDraft)
+        .filter(([, sid]) => Number(sid) > 0)
+        .map(([group_name, subject_id]) => ({
+          group_name,
+          subject_id: Number(subject_id),
+        }));
+
+      if (choices.length === 0) throw new Error("Select at least one optional subject");
+
+      const payload = { choices, optional_choices: choices };
+      const res = await api.post(`/api/students/${enrollmentId}/optional-choices`, payload);
+      return res.data;
+    },
+    onSuccess: async () => {
+      toast.success("Optional subjects saved");
+      setOptDirty(false);
+      await qc.invalidateQueries({ queryKey: ["students", "profile", enrollmentId] });
+      await qc.invalidateQueries({ queryKey: ["marks", "ledger", examId, enrollmentId] });
+    },
+    onError: (err) => {
+      toast.error(err?.response?.data?.message || err.message || "Failed to save optionals");
     },
   });
 
@@ -264,6 +360,54 @@ export default function MarksEntryPage() {
   }, [examsQ.data, examId]);
 
   const isPublished = !!(selectedExam?.published_at || selectedExam?.is_published);
+
+  const optionalGroups = useMemo(() => {
+    const raw =
+      catalogQ.data?.catalog_groups ||
+      catalogQ.data?.groups ||
+      catalogQ.data?.data?.catalog_groups ||
+      catalogQ.data?.data?.groups ||
+      [];
+
+    const groups = Array.isArray(raw) ? raw : [];
+
+    const normalizedFromCatalog = groups
+      .map((g) => {
+        const group_name = g.group_name || g.name || g.title || "";
+        const subs = g.subjects || g.items || g.subject_list || [];
+        const subjects = (Array.isArray(subs) ? subs : []).map((s) => {
+          const components = s.components || [];
+          const th = components.find((c) => c.component_type === "TH");
+          const code = th?.component_code || components?.[0]?.component_code || "";
+          return {
+            id: s.id ?? s.subject_id,
+            name: s.name ?? s.subject_name,
+            code,
+          };
+        });
+        if (!group_name) return null;
+        return { group_name, subjects: subjects.filter((x) => x.id) };
+      })
+      .filter(Boolean);
+
+    if (normalizedFromCatalog.length > 0) return normalizedFromCatalog;
+
+    const choiceGroups = (profileQ.data?.optional_choices || [])
+      .map((c) => c.group_name)
+      .filter(Boolean);
+    const uniqueGroups = [...new Set(choiceGroups)];
+
+    const fallbackSubjects = (profileQ.data?.optional_subjects || []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      code: s.components?.[0]?.component_code || "",
+    }));
+
+    return uniqueGroups.map((group_name) => ({
+      group_name,
+      subjects: fallbackSubjects,
+    }));
+  }, [catalogQ.data, profileQ.data, profileQ.data?.optional_choices]);
 
   return (
     <div className="space-y-4">
@@ -328,6 +472,90 @@ export default function MarksEntryPage() {
         </CardContent>
       </Card>
 
+      {enrollmentId ? (
+        <Card>
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-medium">Optional Subjects</div>
+                <div className="text-xs text-muted-foreground">
+                  Select optional subjects for this student before entering marks.
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  disabled={!optDirty || saveOptionals.isPending || isPublished}
+                  onClick={() => {
+                    const serverChoices = profileQ.data?.optional_choices || [];
+                    const draft = {};
+                    for (const c of serverChoices) {
+                      if (!c?.group_name) continue;
+                      draft[c.group_name] = Number(c.subject_id) || "";
+                    }
+                    setOptDraft(draft);
+                    setOptDirty(false);
+                  }}
+                >
+                  Reset
+                </Button>
+
+                <Button
+                  disabled={saveOptionals.isPending || !optDirty || isPublished}
+                  onClick={() => saveOptionals.mutate()}
+                >
+                  {saveOptionals.isPending ? "Saving..." : "Save Optionals"}
+                </Button>
+              </div>
+            </div>
+
+            {profileQ.isLoading ? (
+              <div className="text-sm text-muted-foreground">Loading profile...</div>
+            ) : optionalGroups.length === 0 ? (
+              <div className="text-sm text-muted-foreground">
+                No optional groups found for this student.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                {optionalGroups.map((g) => {
+                  const current = optDraft[g.group_name] ?? "";
+                  const opts = (g.subjects || []).map((s) => ({
+                    value: String(s.id),
+                    label: `${s.name}${s.code ? ` (${pad4(s.code)})` : ""}`,
+                  }));
+
+                  return (
+                    <div key={g.group_name} className="rounded-md border p-3">
+                      <div className="text-sm font-medium">{g.group_name}</div>
+                      <div className="mt-2">
+                        <select
+                          className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                          value={String(current || "")}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setOptDraft((p) => ({ ...p, [g.group_name]: v }));
+                            setOptDirty(true);
+                          }}
+                          disabled={isPublished}
+                        >
+                          <option value="">Select subject</option>
+                          {opts.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
+
       <div className="rounded-lg border">
         <div className="flex items-center justify-between p-3 border-b">
           <div className="text-sm font-medium">Ledger</div>
@@ -366,8 +594,26 @@ export default function MarksEntryPage() {
             </div>
           ) : (
             <div className="space-y-3">
-              {ledgerRows.map((r) => (
-                <div key={r.component_code} className="rounded-md border p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-sm text-muted-foreground">
+                  Components: {ledgerRows.length}
+                </div>
+                <div className="w-full sm:w-[280px]">
+                  <Input
+                    value={ledgerQuery}
+                    onChange={(e) => setLedgerQuery(e.target.value)}
+                    placeholder="Filter components..."
+                  />
+                </div>
+              </div>
+
+              {filteredLedgerRows.length === 0 ? (
+                <div className="text-sm text-muted-foreground">
+                  No components match filter.
+                </div>
+              ) : (
+                filteredLedgerRows.map((r) => (
+                  <div key={r.component_code} className="rounded-md border p-3">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <div className="text-sm font-medium">
@@ -385,15 +631,38 @@ export default function MarksEntryPage() {
 
                     <div className="w-full sm:w-[240px]">
                       <label className="text-xs text-muted-foreground">Marks</label>
-                      <Input
-                        disabled={isPublished}
-                        placeholder="Enter marks"
-                        value={marks[r.component_code] ?? ""}
-                        onChange={(e) => {
-                          const v = toNumberOrEmpty(e.target.value);
-                          setMarks((p) => ({ ...p, [r.component_code]: v === "" ? "" : String(v) }));
-                        }}
-                      />
+                      {(() => {
+                        const full = r.full_marks;
+                        const raw = marks[r.component_code] ?? "";
+                        const num = raw === "" ? "" : Number(raw);
+                        const isInvalid =
+                          raw !== "" &&
+                          (!Number.isFinite(num) ||
+                            (full != null && (num < 0 || num > full)));
+
+                        return (
+                          <>
+                            <Input
+                              disabled={isPublished}
+                              placeholder="Enter marks"
+                              value={raw}
+                              className={isInvalid ? "border-destructive" : ""}
+                              onChange={(e) => {
+                                const v = toNumberOrEmpty(e.target.value);
+                                setMarks((p) => ({
+                                  ...p,
+                                  [r.component_code]: v === "" ? "" : String(v),
+                                }));
+                              }}
+                            />
+                            {isInvalid ? (
+                              <div className="text-[11px] text-destructive mt-1">
+                                Invalid marks
+                              </div>
+                            ) : null}
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
 
@@ -405,7 +674,8 @@ export default function MarksEntryPage() {
                       : "Enter obtained marks. Leave blank if not applicable."}
                   </div>
                 </div>
-              ))}
+                ))
+              )}
 
               {/* {previewQ.data ? (
                 <div className="rounded-lg border p-3">

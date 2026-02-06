@@ -90,6 +90,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import ProtectedRoute from "./ProtectedRoute";
 
 import LoginPage from "../pages/auth/LoginPage";
+import ResetPasswordPage from "../pages/auth/ResetPasswordPage";
 import DashboardLayout from "../layouts/DashboardLayout";
 import DashboardHome from "../pages/dashboard/DashboardHome";
 
@@ -108,11 +109,23 @@ import MarksEntryPage from "../modules/marks/MarksEntryPage";
 import MarksGridPage from "../modules/marks/MarksGridPage";
 
 import InvitesPage from "../pages/admin/InvitesPage";
+import AddUserPage from "../pages/admin/AddUserPage";
+import UsersPage from "../pages/admin/UsersPage";
+import PublicResultsPage from "../pages/public/PublicResultsPage";
+import MyResultsPage from "../pages/student/MyResultsPage";
+import SettingsPage from "../pages/admin/SettingsPage";
+import ReportsPage from "../pages/reports/ReportsPage";
+import CorrectionsPage from "../pages/corrections/CorrectionsPage";
+import ProfilePage from "../pages/account/ProfilePage";
+import BulkSmsPage from "../pages/results/BulkSmsPage";
+import MarksheetPrintPage from "../pages/results/MarksheetPrintPage";
 
 export default function AppRouter() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/public" element={<PublicResultsPage />} />
 
       <Route
         path="/"
@@ -146,12 +159,18 @@ export default function AppRouter() {
 
         {/* Admin */}
         <Route path="admin/invites" element={<InvitesPage />} />
+        <Route path="admin/users/new" element={<AddUserPage />} />
+        <Route path="admin/users" element={<UsersPage />} />
+        <Route path="settings" element={<SettingsPage />} />
+        <Route path="account/profile" element={<ProfilePage />} />
 
-        {/* Placeholder */}
-        <Route path="reports" element={<div>Reports (next)</div>} />
-        <Route path="corrections" element={<div>Corrections (next)</div>} />
-        <Route path="public" element={<div>Public Portal (later)</div>} />
-        <Route path="my-results" element={<div>My Results (later)</div>} />
+        {/* Results */}
+        <Route path="reports" element={<ReportsPage />} />
+        <Route path="corrections" element={<CorrectionsPage />} />
+        <Route path="results/sms" element={<BulkSmsPage />} />
+        <Route path="results/marksheet" element={<MarksheetPrintPage />} />
+        <Route path="public" element={<PublicResultsPage />} />
+        <Route path="my-results" element={<MyResultsPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

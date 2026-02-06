@@ -23,6 +23,26 @@ async function createCampus(req, res) {
   }
 }
 
+async function updateCampus(req, res) {
+  const id = Number(req.params.id);
+  const { code, name, address, phone, email } = req.body || {};
+  if (!id) return res.status(400).json({ ok: false, message: "Invalid campus id" });
+  if (!code || !name) return res.status(400).json({ ok: false, message: "code and name required" });
+
+  try {
+    await db.query(
+      `UPDATE campuses SET code=?, name=?, address=?, phone=?, email=? WHERE id=?`,
+      [code, name, address || null, phone || null, email || null, id]
+    );
+    res.json({ ok: true, message: "Campus updated" });
+  } catch (e) {
+    if (String(e.message).toLowerCase().includes("duplicate")) {
+      return res.status(409).json({ ok: false, message: "Campus code already exists" });
+    }
+    res.status(500).json({ ok: false, message: "Server error" });
+  }
+}
+
 async function listAcademicYears(req, res) {
   const [rows] = await db.query(`SELECT * FROM academic_years ORDER BY year_bs DESC`);
   res.json({ ok: true, academic_years: rows });
@@ -43,6 +63,31 @@ async function createAcademicYear(req, res) {
       [String(year_bs), year_ad || null, is_current ? 1 : 0]
     );
     res.json({ ok: true, id: r.insertId });
+  } catch (e) {
+    if (String(e.message).toLowerCase().includes("duplicate")) {
+      return res.status(409).json({ ok: false, message: "Academic year already exists" });
+    }
+    res.status(500).json({ ok: false, message: "Server error" });
+  }
+}
+
+async function updateAcademicYear(req, res) {
+  const id = Number(req.params.id);
+  const { year_bs, year_ad, is_current } = req.body || {};
+  if (!id) return res.status(400).json({ ok: false, message: "Invalid academic year id" });
+  if (!year_bs) return res.status(400).json({ ok: false, message: "year_bs required" });
+
+  // If setting current, first unset others
+  if (is_current === true) {
+    await db.query(`UPDATE academic_years SET is_current=0`);
+  }
+
+  try {
+    await db.query(
+      `UPDATE academic_years SET year_bs=?, year_ad=?, is_current=? WHERE id=?`,
+      [String(year_bs), year_ad || null, is_current ? 1 : 0, id]
+    );
+    res.json({ ok: true, message: "Academic year updated" });
   } catch (e) {
     if (String(e.message).toLowerCase().includes("duplicate")) {
       return res.status(409).json({ ok: false, message: "Academic year already exists" });
@@ -74,14 +119,46 @@ async function createFaculty(req, res) {
   }
 }
 
+async function updateFaculty(req, res) {
+  const id = Number(req.params.id);
+  const { code, name } = req.body || {};
+  if (!id) return res.status(400).json({ ok: false, message: "Invalid faculty id" });
+  if (!code || !name) return res.status(400).json({ ok: false, message: "code and name required" });
+
+  try {
+    await db.query(
+      `UPDATE faculties SET code=?, name=? WHERE id=?`,
+      [code, name, id]
+    );
+    res.json({ ok: true, message: "Faculty updated" });
+  } catch (e) {
+    if (String(e.message).toLowerCase().includes("duplicate")) {
+      return res.status(409).json({ ok: false, message: "Faculty code already exists" });
+    }
+    res.status(500).json({ ok: false, message: "Server error" });
+  }
+}
+
 async function listClasses(req, res) {
   const [rows] = await db.query(`SELECT * FROM classes ORDER BY name ASC`);
   res.json({ ok: true, classes: rows });
 }
 
+async function listGradingSchemes(req, res) {
+  try {
+    const [rows] = await db.query(
+      `SELECT id, name, overall_method FROM grading_schemes ORDER BY id DESC`
+    );
+    res.json({ ok: true, grading_schemes: rows });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: "Failed to load grading schemes" });
+  }
+}
+
 async function listSections(req, res) {
   const [rows] = await db.query(
     `SELECT s.id,s.name,s.is_active,
+            s.campus_id, s.academic_year_id, s.class_id, s.faculty_id,
             c.name AS campus,
             ay.year_bs AS academic_year,
             cl.name AS class,
@@ -109,6 +186,30 @@ async function createSection(req, res) {
       [campus_id, academic_year_id, class_id, faculty_id, name]
     );
     res.json({ ok: true, id: r.insertId });
+  } catch (e) {
+    if (String(e.message).toLowerCase().includes("duplicate")) {
+      return res.status(409).json({ ok: false, message: "Section already exists" });
+    }
+    res.status(500).json({ ok: false, message: "Server error" });
+  }
+}
+
+async function updateSection(req, res) {
+  const id = Number(req.params.id);
+  const { campus_id, academic_year_id, class_id, faculty_id, name, is_active } = req.body || {};
+  if (!id) return res.status(400).json({ ok: false, message: "Invalid section id" });
+  if (!campus_id || !academic_year_id || !class_id || !faculty_id || !name) {
+    return res.status(400).json({ ok: false, message: "campus_id, academic_year_id, class_id, faculty_id, name required" });
+  }
+
+  try {
+    await db.query(
+      `UPDATE sections
+       SET campus_id=?, academic_year_id=?, class_id=?, faculty_id=?, name=?, is_active=?
+       WHERE id=?`,
+      [campus_id, academic_year_id, class_id, faculty_id, name, is_active ? 1 : 0, id]
+    );
+    res.json({ ok: true, message: "Section updated" });
   } catch (e) {
     if (String(e.message).toLowerCase().includes("duplicate")) {
       return res.status(409).json({ ok: false, message: "Section already exists" });
@@ -199,12 +300,20 @@ async function getSubjectById(req, res) {
 // module.exports = { listCampuses, createCampus, listAcademicYears, createAcademicYear };
 
 module.exports = {
-  listCampuses, createCampus,
-  listAcademicYears, createAcademicYear,
-  listFaculties, createFaculty,
+  listCampuses,
+  createCampus,
+  updateCampus,
+  listAcademicYears,
+  createAcademicYear,
+  updateAcademicYear,
+  listFaculties,
+  createFaculty,
+  updateFaculty,
   listClasses,
-  listSections, createSection,
-  getSubjectCatalog, getSubjectById
+  listGradingSchemes,
+  listSections,
+  createSection,
+  updateSection,
+  getSubjectCatalog,
+  getSubjectById,
 };
-
-

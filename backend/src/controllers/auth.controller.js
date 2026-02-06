@@ -1,6 +1,7 @@
 const db = require("../db");
 const { hashPassword, verifyPassword } = require("../utils/crypto");
-const { signJwt } = require("../utils/jwt");
+const { signJwt, verifyJwt } = require("../utils/jwt");
+const { sendPasswordResetEmail } = require("../services/mailer");
 
 const crypto = require("crypto");
 // const bcrypt = require("bcryptjs");
@@ -100,6 +101,77 @@ async function createUser(req, res) {
   }
 }
 
+async function forgotPassword(req, res) {
+  const { email } = req.body || {};
+  if (!email) {
+    return res.status(400).json({ ok: false, message: "email required" });
+  }
+
+  const [[user]] = await db.query(
+    `SELECT id, full_name, email FROM users WHERE email=? LIMIT 1`,
+    [email]
+  );
+
+  if (user) {
+    const token = signJwt(
+      { uid: user.id, purpose: "password_reset" },
+      { expiresIn: process.env.RESET_TOKEN_TTL || "1h" }
+    );
+
+    const baseUrl =
+      process.env.APP_WEB_URL ||
+      process.env.FRONTEND_URL ||
+      "http://localhost:5173";
+    const resetUrl = `${String(baseUrl).replace(/\/$/, "")}/reset-password?token=${encodeURIComponent(
+      token
+    )}`;
+
+    try {
+      await sendPasswordResetEmail({
+        to: user.email,
+        name: user.full_name,
+        resetUrl,
+      });
+    } catch (e) {
+      return res.status(500).json({
+        ok: false,
+        message: "Failed to send reset email. Check SMTP configuration.",
+      });
+    }
+  }
+
+  // Always respond with success to avoid account enumeration.
+  return res.json({
+    ok: true,
+    message: "If the account exists, reset instructions were sent.",
+  });
+}
+
+async function resetPassword(req, res) {
+  const { token, password } = req.body || {};
+  if (!token || !password) {
+    return res.status(400).json({ ok: false, message: "token and password required" });
+  }
+
+  let payload;
+  try {
+    payload = verifyJwt(token);
+  } catch (e) {
+    return res.status(400).json({ ok: false, message: "Invalid or expired token" });
+  }
+
+  if (!payload?.uid || payload?.purpose !== "password_reset") {
+    return res.status(400).json({ ok: false, message: "Invalid token" });
+  }
+
+  const password_hash = await hashPassword(password);
+  await db.query(`UPDATE users SET password_hash=? WHERE id=?`, [
+    password_hash,
+    payload.uid,
+  ]);
+
+  return res.json({ ok: true, message: "Password reset successful" });
+}
 // invitation controller-------------------------
 function sha256(s) {
   return crypto.createHash("sha256").update(String(s)).digest("hex");
@@ -144,7 +216,7 @@ async function acceptInvite(req, res) {
     const [[roleRow]] = await db.query(`SELECT id FROM roles WHERE name=? LIMIT 1`, [inv.role]);
     if (!roleRow) return res.status(400).json({ ok: false, message: "Invalid role in invite" });
 
-      const hash = await hashPassword(password);
+    const hash = await hashPassword(password);
 
 
     // ✅ insert user with role_id (NOT role)
@@ -153,10 +225,6 @@ async function acceptInvite(req, res) {
     //    VALUES (?,?,?,?,1,?,NOW())`,
     //   [roleRow.id, full_name, email, hash, inv.created_by]
     // );
-    // get role_id from roles table using inv.role
-    // const [[roleRow]] = await db.query(`SELECT id FROM roles WHERE name=? LIMIT 1`, [inv.role]);
-    if (!roleRow) return res.status(400).json({ ok: false, message: "Invalid role in invite" });
-
     const [ins] = await db.query(
       `INSERT INTO users (role_id, full_name, email, password_hash, is_active)
       VALUES (?,?,?,?,1)`,
@@ -175,4 +243,11 @@ async function acceptInvite(req, res) {
 
 
 
-module.exports = { bootstrapSuperAdmin, login, createUser, acceptInvite };
+module.exports = {
+  bootstrapSuperAdmin,
+  login,
+  createUser,
+  acceptInvite,
+  forgotPassword,
+  resetPassword,
+};

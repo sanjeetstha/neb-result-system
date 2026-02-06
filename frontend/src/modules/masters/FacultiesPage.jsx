@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { api } from "../../lib/api";
+import { usePagination } from "../../lib/usePagination";
 
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -22,27 +23,32 @@ import {
   TableRow,
 } from "../../components/ui/table";
 import { Badge } from "../../components/ui/badge";
+import PaginationBar from "../../components/ui/pagination-bar";
 
-function normalizePayload(code, name) {
-  const c = String(code ?? "").trim().toUpperCase();
-  const n = String(name ?? "").trim();
-  if (!c) return null;
-  if (!n) return null;
-  return { code: c, name: n };
+function norm(v) {
+  return String(v ?? "").trim();
+}
+
+function normalizePayload(form) {
+  const code = norm(form.code);
+  const name = norm(form.name);
+  if (!code || !name) return { error: "Faculty code and name are required" };
+  return { payload: { code, name } };
 }
 
 export default function FacultiesPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [code, setCode] = useState("");
-  const [name, setName] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+
+  const [form, setForm] = useState({ code: "", name: "" });
 
   const q = useQuery({
     queryKey: ["masters", "faculties"],
     queryFn: async () => {
       const res = await api.get("/api/masters/faculties");
-      const data =
-        res.data?.faculties ?? res.data?.programs ?? res.data?.data ?? res.data;
+      const data = res.data?.faculties ?? res.data?.data ?? res.data;
       return Array.isArray(data) ? data : [];
     },
     staleTime: 30_000,
@@ -50,45 +56,99 @@ export default function FacultiesPage() {
 
   const create = useMutation({
     mutationFn: async () => {
-      const payload = normalizePayload(code, name);
-      if (!payload) throw new Error("Faculty code and name are required");
+      const { payload, error } = normalizePayload(form);
+      if (error) throw new Error(error);
       const res = await api.post("/api/masters/faculties", payload);
       return res.data;
     },
     onSuccess: async () => {
       toast.success("Faculty created");
-      setCode("");
-      setName("");
+      setForm({ code: "", name: "" });
       setOpen(false);
       await qc.invalidateQueries({ queryKey: ["masters", "faculties"] });
     },
     onError: (err) => {
-      toast.error(
-        err?.response?.data?.message || err.message || "Failed to create faculty"
-      );
+      toast.error(err?.response?.data?.message || err.message || "Failed to create faculty");
+    },
+  });
+
+  const update = useMutation({
+    mutationFn: async () => {
+      const { payload, error } = normalizePayload(form);
+      if (error) throw new Error(error);
+      const res = await api.put(`/api/masters/faculties/${editingId}`, payload);
+      return res.data;
+    },
+    onSuccess: async () => {
+      toast.success("Faculty updated");
+      setEditOpen(false);
+      setEditingId(null);
+      setForm({ code: "", name: "" });
+      await qc.invalidateQueries({ queryKey: ["masters", "faculties"] });
+    },
+    onError: (err) => {
+      toast.error(err?.response?.data?.message || err.message || "Failed to update faculty");
     },
   });
 
   const rows = useMemo(() => {
     const arr = q.data || [];
-    return arr
-      .map((x) => ({
-        id: x.id ?? x.faculty_id ?? "",
-        code: x.code ?? x.short_code ?? "",
-        name: x.name ?? x.title ?? x.program_name ?? "",
-        is_active: Number(x.is_active ?? 1) === 1,
-        raw: x,
-      }))
-      .sort((a, b) => String(a.code).localeCompare(String(b.code)));
+    return arr.map((x) => ({
+      id: x.id ?? x.faculty_id ?? "",
+      code: x.code ?? "",
+      name: x.name ?? "",
+      is_active: Number(x.is_active ?? 1) === 1,
+      raw: x,
+    }));
   }, [q.data]);
+
+  const pager = usePagination(rows, 10);
+
+  const openEdit = (r) => {
+    setEditingId(r.id);
+    setForm({ code: r.code || "", name: r.name || "" });
+    setEditOpen(true);
+  };
+
+  const renderForm = (onSave, label) => (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Faculty code</label>
+          <Input
+            placeholder="e.g., MGT"
+            value={form.code}
+            onChange={(e) => setForm((p) => ({ ...p, code: e.target.value }))}
+          />
+        </div>
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Faculty name</label>
+          <Input
+            placeholder="Management"
+            value={form.name}
+            onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+          />
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <Button variant="outline" onClick={() => { setOpen(false); setEditOpen(false); }}>
+          Cancel
+        </Button>
+        <Button onClick={onSave} disabled={create.isPending || update.isPending}>
+          {create.isPending || update.isPending ? "Saving..." : label}
+        </Button>
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="text-base font-semibold">Faculties / Programs</h3>
+          <h3 className="text-base font-semibold">Faculties</h3>
           <p className="text-sm text-muted-foreground">
-            Example: MGMT, HUM, EDU, SCI, HM, CS.
+            Define faculty list (Science, Management, Humanities, etc.).
           </p>
         </div>
 
@@ -101,41 +161,7 @@ export default function FacultiesPage() {
             <DialogHeader>
               <DialogTitle>Add faculty</DialogTitle>
             </DialogHeader>
-
-            <div className="space-y-3">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <div className="space-y-2 sm:col-span-1">
-                  <label className="text-sm font-medium">Code</label>
-                  <Input
-                    placeholder="MGMT"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value.toUpperCase())}
-                  />
-                </div>
-
-                <div className="space-y-2 sm:col-span-2">
-                  <label className="text-sm font-medium">Name</label>
-                  <Input
-                    placeholder="Management"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => setOpen(false)}
-                  disabled={create.isPending}
-                >
-                  Cancel
-                </Button>
-                <Button onClick={() => create.mutate()} disabled={create.isPending}>
-                  {create.isPending ? "Saving..." : "Save"}
-                </Button>
-              </div>
-            </div>
+            {renderForm(() => create.mutate(), "Save")}
           </DialogContent>
         </Dialog>
       </div>
@@ -161,20 +187,21 @@ export default function FacultiesPage() {
                   <TableHead className="w-[90px]">ID</TableHead>
                   <TableHead className="w-[120px]">Code</TableHead>
                   <TableHead>Name</TableHead>
-                  <TableHead className="w-[140px]">Status</TableHead>
+                  <TableHead className="w-[120px]">Status</TableHead>
+                  <TableHead className="w-[120px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
 
               <TableBody>
-                {rows.length === 0 ? (
+                {pager.pageItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
                       {q.isLoading ? "Loading..." : "No faculties found."}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rows.map((r) => (
-                    <TableRow key={r.id || r.code}>
+                  pager.pageItems.map((r) => (
+                    <TableRow key={r.id}>
                       <TableCell className="font-mono text-xs">{r.id}</TableCell>
                       <TableCell className="font-mono text-xs">{r.code}</TableCell>
                       <TableCell className="font-medium">{r.name}</TableCell>
@@ -185,6 +212,11 @@ export default function FacultiesPage() {
                           <Badge variant="destructive">Inactive</Badge>
                         )}
                       </TableCell>
+                      <TableCell>
+                        <Button size="sm" variant="outline" onClick={() => openEdit(r)}>
+                          Edit
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))
                 )}
@@ -192,7 +224,24 @@ export default function FacultiesPage() {
             </Table>
           )}
         </div>
+        <PaginationBar
+          page={pager.page}
+          totalPages={pager.totalPages}
+          onPageChange={pager.setPage}
+          pageSize={pager.pageSize}
+          onPageSizeChange={pager.setPageSize}
+          totalItems={pager.totalItems}
+        />
       </div>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit faculty</DialogTitle>
+          </DialogHeader>
+          {renderForm(() => update.mutate(), "Update")}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
