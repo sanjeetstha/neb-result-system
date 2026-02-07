@@ -5,17 +5,25 @@ function getTransporter() {
   const port = Number(process.env.SMTP_PORT || 587);
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
+  const secure =
+    typeof process.env.SMTP_SECURE !== "undefined"
+      ? String(process.env.SMTP_SECURE).toLowerCase() === "true"
+      : port === 465;
 
   if (!host || !user || !pass) {
     throw new Error("SMTP config missing in .env (SMTP_HOST/SMTP_USER/SMTP_PASS)");
   }
 
-  return nodemailer.createTransport({
+  const transporter = nodemailer.createTransport({
     host,
     port,
-    secure: port === 465,
+    secure,
     auth: { user, pass },
+    ...(process.env.SMTP_TLS_REJECT_UNAUTHORIZED === "false"
+      ? { tls: { rejectUnauthorized: false } }
+      : {}),
   });
+  return transporter;
 }
 
 async function sendInviteEmail({ to, inviteUrl, role }) {
@@ -57,4 +65,21 @@ async function sendPasswordResetEmail({ to, name, resetUrl }) {
   });
 }
 
-module.exports = { sendInviteEmail, sendPasswordResetEmail };
+async function sendPasswordChangedEmail({ to, name }) {
+  const from = process.env.SMTP_FROM || process.env.SMTP_USER;
+  const displayName = process.env.APP_NAME || "NEB Result System";
+
+  const transporter = getTransporter();
+  await transporter.sendMail({
+    from,
+    to,
+    subject: `Password Changed - ${displayName}`,
+    html: `
+      <p>Hello${name ? ` ${name}` : ""},</p>
+      <p>Your <b>${displayName}</b> account password was changed by an administrator.</p>
+      <p>If you did not request this change, please contact the campus administrator immediately.</p>
+    `,
+  });
+}
+
+module.exports = { sendInviteEmail, sendPasswordResetEmail, sendPasswordChangedEmail };

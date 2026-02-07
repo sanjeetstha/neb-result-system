@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily NEB Result System DB Backup
+
+[Timer]
+OnCalendar=*-*-* 02:10:00
+Persistent=true
+RandomizedDelaySec=20m
+
+[Install]
+WantedBy=timers.target

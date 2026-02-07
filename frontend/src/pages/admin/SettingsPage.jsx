@@ -14,6 +14,12 @@ import { Badge } from "../../components/ui/badge";
 
 const PRESETS = [
   {
+    name: "Coastal Slate",
+    primary_color: "#0c2c55",
+    accent_color: "#629fad",
+    sidebar_color: "#0c2c55",
+  },
+  {
     name: "Amber Navy",
     primary_color: "#155263",
     accent_color: "#ff6f3c",
@@ -278,8 +284,12 @@ export default function SettingsPage() {
                 <div className="text-xs text-muted-foreground">Preview</div>
                 <div className="mt-2 flex items-center gap-3">
                   <div
-                    className="h-10 w-10 rounded-xl border"
-                    style={{ background: form.primary_color }}
+                    className="rounded-xl border"
+                    style={{
+                      background: form.primary_color,
+                      height: Math.max(32, Math.min(64, Number(form.logo_size) || 44)),
+                      width: Math.max(32, Math.min(64, Number(form.logo_size) || 44)),
+                    }}
                   />
                   <div>
                     <div className="font-semibold font-display">{form.brand_name}</div>
@@ -360,6 +370,55 @@ export default function SettingsPage() {
                       </div>
                     </button>
                   ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Logo Size</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Sidebar Logo Size</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="32"
+                    max="64"
+                    value={form.logo_size || 44}
+                    onChange={(e) => update({ logo_size: Number(e.target.value || 44) })}
+                    className="w-full"
+                  />
+                  <Input
+                    className="w-20"
+                    value={form.logo_size || 44}
+                    onChange={(e) =>
+                      update({ logo_size: Number(e.target.value || 44) })
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Header Logo Size</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="20"
+                    max="48"
+                    value={form.logo_small_size || 28}
+                    onChange={(e) => update({ logo_small_size: Number(e.target.value || 28) })}
+                    className="w-full"
+                  />
+                  <Input
+                    className="w-20"
+                    value={form.logo_small_size || 28}
+                    onChange={(e) =>
+                      update({ logo_small_size: Number(e.target.value || 28) })
+                    }
+                  />
                 </div>
               </div>
             </CardContent>

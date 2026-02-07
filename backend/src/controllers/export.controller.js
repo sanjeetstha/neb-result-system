@@ -267,14 +267,15 @@ async function buildMarksheetComponentRows(exam_id, enrollment_id, rules) {
     else if (obtained == null) remark = "W"; // withheld / missing
 
     // grade/gpa from percent
+    const effectiveObtained = obtained == null ? 0 : obtained;
     let percent = 0;
-    if (obtained != null && full > 0) percent = (obtained / full) * 100;
+    if (full > 0) percent = (effectiveObtained / full) * 100;
 
     const gpaRule = pickByMinValue(rules.gpaRules, percent);
     const gradeRule = pickByMinValue(rules.gradeRules, percent);
 
-    const gpa = obtained == null ? "" : gpaRule?.gpa != null ? Number(gpaRule.gpa) : 0;
-    const grade = obtained == null ? "" : gradeRule?.grade || "NG";
+    const gpa = gpaRule?.gpa != null ? Number(gpaRule.gpa) : 0;
+    const grade = gradeRule?.grade || "NG";
 
     rowsOut.push({
       subject_name: c.subject_name,

@@ -38,15 +38,16 @@ async function bootstrapSuperAdmin(req, res) {
 
 async function login(req, res) {
   const { email, password } = req.body || {};
-  if (!email || !password) {
-    return res.status(400).json({ ok: false, message: "email and password required" });
+  const identifier = String(email || "").trim();
+  if (!identifier || !password) {
+    return res.status(400).json({ ok: false, message: "email/username and password required" });
   }
 
   const [rows] = await db.query(
     `SELECT u.id, u.full_name, u.email, u.password_hash, u.is_active, r.name AS role
      FROM users u JOIN roles r ON r.id=u.role_id
-     WHERE u.email=? LIMIT 1`,
-    [email]
+     WHERE LOWER(u.email)=LOWER(?) OR LOWER(u.full_name)=LOWER(?) LIMIT 1`,
+    [identifier, identifier]
   );
 
   if (rows.length === 0) return res.status(401).json({ ok: false, message: "Invalid credentials" });
@@ -133,9 +134,11 @@ async function forgotPassword(req, res) {
         resetUrl,
       });
     } catch (e) {
+      console.error("Password reset email failed", e);
       return res.status(500).json({
         ok: false,
-        message: "Failed to send reset email. Check SMTP configuration.",
+        message:
+          "Failed to send reset email. Check SMTP configuration (Gmail may require an App Password).",
       });
     }
   }

@@ -9,7 +9,6 @@ import {
   Bell,
   Sparkles,
   UserCog,
-  Check,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import {
@@ -101,20 +100,17 @@ export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed,
             <img
               src={settings.logo_small_data_url || settings.logo_data_url}
               alt="Logo"
-              className="h-7 w-7 rounded-md object-cover border"
+              className="rounded-md object-cover border"
+              style={{
+                height: Math.max(20, Math.min(48, Number(settings.logo_small_size) || 28)),
+                width: Math.max(20, Math.min(48, Number(settings.logo_small_size) || 28)),
+              }}
             />
           ) : null}
           {settings.brand_name}
         </div>
 
-        <div className="flex-1 hidden md:flex items-center justify-center">
-          <div className="text-center leading-tight">
-            <div className="text-sm font-medium text-foreground">
-              {me?.name || me?.full_name || me?.email || "User"}
-            </div>
-            <div className="text-xs text-muted-foreground">{me?.role || "—"}</div>
-          </div>
-        </div>
+        <div className="flex-1" />
 
         <div className="ml-auto flex items-center gap-2">
           {canQuickActions ? (
@@ -207,11 +203,13 @@ export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed,
                     {avatarSrc ? <AvatarImage src={avatarSrc} alt="User avatar" /> : null}
                     <AvatarFallback>{initials}</AvatarFallback>
                   </Avatar>
-                  {isActive ? (
-                    <span className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full bg-[#1877F2] border-2 border-background flex items-center justify-center shadow-sm">
-                      <Check className="h-3 w-3 text-white" />
-                    </span>
-                  ) : null}
+                  <span
+                    className={[
+                      "absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-background shadow-sm",
+                      isActive ? "bg-emerald-500" : "bg-rose-500",
+                    ].join(" ")}
+                    title={isActive ? "Online" : "Offline"}
+                  />
                 </div>
               </Button>
             </DropdownMenuTrigger>
@@ -239,14 +237,6 @@ export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed,
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button
-            variant="outline"
-            size="sm"
-            className="hidden md:inline-flex"
-            onClick={onLogout}
-          >
-            Logout
-          </Button>
         </div>
       </div>
     </header>

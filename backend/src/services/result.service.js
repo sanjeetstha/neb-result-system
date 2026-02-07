@@ -109,7 +109,10 @@ async function previewResult({ examId, enrollmentId }) {
 
     const mk = markByCode.get(code);
     const full = Number(cfg.full_marks);
-    const obtained = mk?.is_absent ? null : (mk?.marks_obtained != null ? Number(mk.marks_obtained) : null);
+    // Missing/absent marks are treated as 0 (Excel behavior)
+    const obtained = mk?.is_absent
+      ? 0
+      : (mk?.marks_obtained != null ? Number(mk.marks_obtained) : 0);
 
     if (!bySubject.has(c.subject_id)) {
       bySubject.set(c.subject_id, {
@@ -118,7 +121,6 @@ async function previewResult({ examId, enrollmentId }) {
         total_obtained: 0,
         total_full: 0,
         total_credit: 0,
-        any_missing: false,
         any_absent: false
       });
     }
@@ -131,12 +133,8 @@ async function previewResult({ examId, enrollmentId }) {
 
     if (mk?.is_absent) {
       agg.any_absent = true;
-      agg.any_missing = true;
-    } else if (obtained == null) {
-      agg.any_missing = true;
-    } else {
-      agg.total_obtained += obtained;
     }
+    agg.total_obtained += obtained;
   }
 
   const subjects = [];
@@ -157,17 +155,15 @@ async function previewResult({ examId, enrollmentId }) {
     const gpa = gpaRule?.gpa != null ? Number(gpaRule.gpa) : 0;
     const grade = gradeRule?.grade || "NG";
 
-    const status = agg.any_missing ? "INCOMPLETE" : (gpa <= 0 ? "FAIL" : "PASS");
-    if (!agg.any_missing && gpa <= 0) failed = true;
+    const status = gpa <= 0 ? "FAIL" : "PASS";
+    if (gpa <= 0) failed = true;
 
-    if (!agg.any_missing) {
-      gpaSum += gpa;
-      gpaCount += 1;
+    gpaSum += gpa;
+    gpaCount += 1;
 
-      const credit = agg.total_credit > 0 ? agg.total_credit : 1;
-      weightedSum += gpa * credit;
-      creditSum += credit;
-    }
+    const credit = agg.total_credit > 0 ? agg.total_credit : 1;
+    weightedSum += gpa * credit;
+    creditSum += credit;
 
     subjects.push({
       subject_id: agg.subject_id,

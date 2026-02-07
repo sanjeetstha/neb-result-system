@@ -12,39 +12,39 @@
     --font-display: "Fraunces", ui-sans-serif, system-ui, -apple-system,
       "Segoe UI", sans-serif;
 
-    --background: 35 45% 98%;
-    --foreground: 222 26% 14%;
+    --background: 60 46% 87%;
+    --foreground: 214 75% 19%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 222 26% 14%;
+    --card: 53 50% 94%;
+    --card-foreground: 214 75% 19%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222 26% 14%;
+    --popover: 53 50% 94%;
+    --popover-foreground: 214 75% 19%;
 
-    --primary: 215 28% 20%;
+    --primary: 214 75% 19%;
     --primary-foreground: 210 40% 98%;
 
-    --secondary: 32 32% 95%;
-    --secondary-foreground: 222 26% 14%;
+    --secondary: 194 48% 31%;
+    --secondary-foreground: 210 40% 98%;
 
-    --muted: 30 30% 94%;
-    --muted-foreground: 220 12% 46%;
+    --muted: 191 31% 80%;
+    --muted-foreground: 214 30% 30%;
 
-    --accent: 24 94% 55%;
-    --accent-foreground: 222 26% 14%;
+    --accent: 191 31% 53%;
+    --accent-foreground: 210 40% 98%;
 
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 220 16% 90%;
-    --input: 220 16% 90%;
-    --ring: 215 28% 20%;
+    --border: 191 25% 75%;
+    --input: 191 25% 75%;
+    --ring: 191 31% 53%;
 
     --radius: 0.9rem;
 
-    --sidebar: 215 18% 96%;
-    --sidebar-strong: 215 20% 92%;
-    --sidebar-soft: 215 16% 98%;
+    --sidebar: 214 65% 22%;
+    --sidebar-strong: 214 75% 19%;
+    --sidebar-soft: 194 48% 31%;
     --notice-speed: 28s;
   }
 
@@ -97,6 +97,151 @@
   .notice-marquee {
     animation: notice-scroll var(--notice-speed, 28s) linear infinite;
   }
+}
+
+@layer utilities {
+  .sheet-overlay {
+    animation-duration: 320ms;
+    animation-timing-function: ease-out;
+    animation-fill-mode: both;
+  }
+  .sheet-overlay[data-state="open"] {
+    animation-name: sheet-fade-in;
+  }
+  .sheet-overlay[data-state="closed"] {
+    animation-name: sheet-fade-out;
+  }
+
+  .sheet-content {
+    animation-duration: 420ms;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    animation-fill-mode: both;
+  }
+
+  .sheet-slide-left[data-state="open"] {
+    animation-name: sheet-in-left;
+  }
+  .sheet-slide-left[data-state="closed"] {
+    animation-name: sheet-out-left;
+    animation-duration: 320ms;
+    animation-timing-function: ease-in;
+  }
+
+  .sheet-slide-right[data-state="open"] {
+    animation-name: sheet-in-right;
+  }
+  .sheet-slide-right[data-state="closed"] {
+    animation-name: sheet-out-right;
+    animation-duration: 320ms;
+    animation-timing-function: ease-in;
+  }
+
+  .sheet-slide-top[data-state="open"] {
+    animation-name: sheet-in-top;
+  }
+  .sheet-slide-top[data-state="closed"] {
+    animation-name: sheet-out-top;
+    animation-duration: 320ms;
+    animation-timing-function: ease-in;
+  }
+
+  .sheet-slide-bottom[data-state="open"] {
+    animation-name: sheet-in-bottom;
+  }
+  .sheet-slide-bottom[data-state="closed"] {
+    animation-name: sheet-out-bottom;
+    animation-duration: 320ms;
+    animation-timing-function: ease-in;
+  }
+}
+
+@keyframes sheet-in-left {
+  from {
+    transform: translateX(-100%);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+@keyframes sheet-out-left {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+}
+@keyframes sheet-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+@keyframes sheet-out-right {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+@keyframes sheet-in-top {
+  from {
+    transform: translateY(-100%);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+@keyframes sheet-out-top {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+}
+@keyframes sheet-in-bottom {
+  from {
+    transform: translateY(100%);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+@keyframes sheet-out-bottom {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+@keyframes sheet-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes sheet-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 
 @keyframes notice-scroll {

@@ -25,6 +25,7 @@ import {
   TableRow,
 } from "../../components/ui/table";
 import PaginationBar from "../../components/ui/pagination-bar";
+import { Trash2 } from "lucide-react";
 
 function norm(v) {
   return String(v ?? "").trim();
@@ -36,7 +37,23 @@ export default function UsersPage() {
 
   const [editOpen, setEditOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({ full_name: "", email: "" });
+  const [editForm, setEditForm] = useState({
+    full_name: "",
+    email: "",
+    role: "",
+    contact_number: "",
+  });
+
+  const [pwOpen, setPwOpen] = useState(false);
+  const [pwTarget, setPwTarget] = useState(null);
+  const [pwForm, setPwForm] = useState({
+    password: "",
+    notify_email: true,
+    notify_sms: false,
+  });
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deletePassword, setDeletePassword] = useState("");
 
   const canAccess = useMemo(() => me?.role === "SUPER_ADMIN", [me]);
 
@@ -70,6 +87,8 @@ export default function UsersPage() {
       const payload = {
         full_name: norm(editForm.full_name),
         email: norm(editForm.email),
+        role: norm(editForm.role),
+        contact_number: norm(editForm.contact_number),
       };
       const res = await api.put(`/api/users/${editingId}`, payload);
       return res.data;
@@ -85,6 +104,53 @@ export default function UsersPage() {
     },
   });
 
+  const changePassword = useMutation({
+    mutationFn: async () => {
+      const payload = {
+        password: pwForm.password,
+        notify_email: !!pwForm.notify_email,
+        notify_sms: !!pwForm.notify_sms,
+      };
+      const res = await api.put(`/api/users/${pwTarget?.id}/password`, payload);
+      return res.data;
+    },
+    onSuccess: (data) => {
+      const warnings = data?.warnings || [];
+      if (warnings.length) {
+        toast.message(`Password updated with warnings: ${warnings.join(", ")}`);
+      } else {
+        toast.success("Password updated");
+      }
+      setPwOpen(false);
+      setPwTarget(null);
+      setPwForm({ password: "", notify_email: true, notify_sms: false });
+    },
+    onError: (err) => {
+      toast.error(
+        err?.response?.data?.message || err.message || "Failed to update password"
+      );
+    },
+  });
+
+  const deleteUser = useMutation({
+    mutationFn: async () => {
+      const res = await api.delete(`/api/users/${deleteTarget?.id}`, {
+        data: { password: deletePassword },
+      });
+      return res.data;
+    },
+    onSuccess: async () => {
+      toast.success("User deleted");
+      setDeleteOpen(false);
+      setDeleteTarget(null);
+      setDeletePassword("");
+      await qc.invalidateQueries({ queryKey: ["users", "list"] });
+    },
+    onError: (err) => {
+      toast.error(err?.response?.data?.message || err.message || "Failed to delete user");
+    },
+  });
+
   const rows = useMemo(() => {
     const arr = usersQ.data || [];
     return arr.map((u) => ({
@@ -92,6 +158,7 @@ export default function UsersPage() {
       full_name: u.full_name ?? u.name ?? "",
       email: u.email ?? "",
       role: u.role ?? u.role_name ?? "",
+      contact_number: u.contact_number ?? u.phone ?? "",
       is_active: Number(u.is_active ?? 1) === 1,
       created_at: u.created_at ?? null,
       last_login_at: u.last_login_at ?? null,
@@ -103,8 +170,29 @@ export default function UsersPage() {
 
   const openEdit = (u) => {
     setEditingId(u.id);
-    setEditForm({ full_name: u.full_name || "", email: u.email || "" });
+    setEditForm({
+      full_name: u.full_name || "",
+      email: u.email || "",
+      role: u.role || "TEACHER",
+      contact_number: u.contact_number || "",
+    });
     setEditOpen(true);
+  };
+
+  const openPassword = (u) => {
+    setPwTarget(u);
+    setPwForm({
+      password: "",
+      notify_email: true,
+      notify_sms: !!u.contact_number,
+    });
+    setPwOpen(true);
+  };
+
+  const openDelete = (u) => {
+    setDeleteTarget(u);
+    setDeletePassword("");
+    setDeleteOpen(true);
   };
 
   if (meLoading) {
@@ -160,15 +248,16 @@ export default function UsersPage() {
                   <TableHead className="w-[80px]">ID</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Email</TableHead>
+                  <TableHead className="w-[140px]">Contact</TableHead>
                   <TableHead className="w-[120px]">Role</TableHead>
                   <TableHead className="w-[120px]">Status</TableHead>
-                  <TableHead className="w-[180px]">Actions</TableHead>
+                  <TableHead className="w-[300px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {pager.pageItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
                       {usersQ.isLoading ? "Loading..." : "No users found."}
                     </TableCell>
                   </TableRow>
@@ -178,6 +267,9 @@ export default function UsersPage() {
                       <TableCell className="font-mono text-xs">{u.id}</TableCell>
                       <TableCell className="font-medium">{u.full_name}</TableCell>
                       <TableCell className="text-xs">{u.email}</TableCell>
+                      <TableCell className="text-xs">
+                        {u.contact_number || "—"}
+                      </TableCell>
                       <TableCell>
                         <Badge variant="outline">{u.role}</Badge>
                       </TableCell>
@@ -188,13 +280,33 @@ export default function UsersPage() {
                           <Badge variant="destructive">Inactive</Badge>
                         )}
                       </TableCell>
-                      <TableCell className="flex flex-wrap gap-2">
+                      <TableCell className="flex gap-2 flex-nowrap items-center">
                         <Button
                           size="sm"
                           variant="outline"
                           onClick={() => openEdit(u)}
                         >
                           Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openPassword(u)}
+                        >
+                          Password
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          title={
+                            u.id === me?.id
+                              ? "You cannot delete your own account"
+                              : "Delete user"
+                          }
+                          onClick={() => openDelete(u)}
+                          disabled={u.id === me?.id}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
                         </Button>
                         <Button
                           size="sm"
@@ -244,12 +356,139 @@ export default function UsersPage() {
                 onChange={(e) => setEditForm((p) => ({ ...p, email: e.target.value }))}
               />
             </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Contact Number</label>
+              <Input
+                value={editForm.contact_number}
+                onChange={(e) =>
+                  setEditForm((p) => ({ ...p, contact_number: e.target.value }))
+                }
+                placeholder="98XXXXXXXX"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Role</label>
+              <select
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                value={editForm.role}
+                onChange={(e) => setEditForm((p) => ({ ...p, role: e.target.value }))}
+              >
+                <option value="SUPER_ADMIN">SUPER_ADMIN</option>
+                <option value="ADMIN">ADMIN</option>
+                <option value="TEACHER">TEACHER</option>
+                <option value="STUDENT">STUDENT</option>
+              </select>
+            </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setEditOpen(false)}>
                 Cancel
               </Button>
               <Button onClick={() => updateUser.mutate()} disabled={updateUser.isPending}>
                 {updateUser.isPending ? "Saving..." : "Update"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={pwOpen} onOpenChange={setPwOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change Password</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="text-xs text-muted-foreground">
+              User: <span className="font-medium">{pwTarget?.full_name || "—"}</span>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">New Password</label>
+              <Input
+                type="password"
+                value={pwForm.password}
+                onChange={(e) => setPwForm((p) => ({ ...p, password: e.target.value }))}
+                placeholder="••••••••"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Notifications</label>
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={!!pwForm.notify_email}
+                    onChange={(e) =>
+                      setPwForm((p) => ({ ...p, notify_email: e.target.checked }))
+                    }
+                  />
+                  Email
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={!!pwForm.notify_sms}
+                    disabled={!pwTarget?.contact_number}
+                    onChange={(e) =>
+                      setPwForm((p) => ({ ...p, notify_sms: e.target.checked }))
+                    }
+                  />
+                  SMS
+                </label>
+                {!pwTarget?.contact_number ? (
+                  <span className="text-[11px] text-muted-foreground">
+                    (no contact number)
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setPwOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={() => changePassword.mutate()} disabled={changePassword.isPending}>
+                {changePassword.isPending ? "Saving..." : "Update Password"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete user</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="text-sm text-muted-foreground">
+              This will permanently delete{" "}
+              <span className="font-medium">{deleteTarget?.full_name || "this user"}</span>.
+              This action cannot be undone.
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Your Password</label>
+              <Input
+                type="password"
+                placeholder="Enter your password to confirm"
+                value={deletePassword}
+                onChange={(e) => setDeletePassword(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setDeleteOpen(false);
+                  setDeleteTarget(null);
+                  setDeletePassword("");
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => deleteUser.mutate()}
+                disabled={!deletePassword || deleteUser.isPending}
+              >
+                {deleteUser.isPending ? "Deleting..." : "Delete"}
               </Button>
             </div>
           </div>

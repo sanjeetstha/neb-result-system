@@ -1,91 +1,10 @@
 const db = require("../db");
-const https = require("https");
-const { URL } = require("url");
+const { normalizePhone, getSmsProvider, sendSms } = require("../services/sms.service");
 
 function renderTemplate(tpl, data) {
   return String(tpl || "").replace(/\{(\w+)\}/g, (_, key) => {
     const v = data[key];
     return v == null ? "" : String(v);
-  });
-}
-
-function normalizePhone(phone) {
-  let digits = String(phone || "").replace(/\D/g, "");
-  if (digits.startsWith("977")) digits = digits.slice(3);
-  if (digits.length > 10) digits = digits.slice(-10);
-  return digits;
-}
-
-async function postForm(url, payload) {
-  const body = new URLSearchParams(payload).toString();
-
-  if (typeof fetch === "function") {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body,
-    });
-    const text = await res.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = text;
-    }
-    if (!res.ok) {
-      throw new Error(typeof data === "string" ? data : data?.message || "SMS request failed");
-    }
-    return data;
-  }
-
-  return new Promise((resolve, reject) => {
-    const u = new URL(url);
-    const req = https.request(
-      {
-        method: "POST",
-        hostname: u.hostname,
-        path: u.pathname + u.search,
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "Content-Length": Buffer.byteLength(body),
-        },
-      },
-      (res) => {
-        let raw = "";
-        res.on("data", (chunk) => (raw += chunk));
-        res.on("end", () => {
-          let data = raw;
-          try {
-            data = JSON.parse(raw);
-          } catch {
-            // keep as string
-          }
-          if (res.statusCode < 200 || res.statusCode >= 300) {
-            return reject(
-              new Error(typeof data === "string" ? data : data?.message || "SMS request failed")
-            );
-          }
-          resolve(data);
-        });
-      }
-    );
-    req.on("error", reject);
-    req.write(body);
-    req.end();
-  });
-}
-
-async function sendAakashSms({ to, text }) {
-  const authToken = process.env.AAKASH_SMS_AUTH_TOKEN;
-  const baseUrl = process.env.AAKASH_SMS_BASE_URL || "https://sms.aakashsms.com/sms/v3/send";
-  if (!authToken) {
-    throw new Error("AAKASH_SMS_AUTH_TOKEN not configured");
-  }
-
-  return postForm(baseUrl, {
-    auth_token: authToken,
-    to,
-    text,
   });
 }
 
@@ -183,16 +102,14 @@ async function bulkSms(req, res) {
     tasks.push({ symbol_no, phone, message });
   }
 
-  const provider = String(
-    process.env.SMS_PROVIDER || (process.env.AAKASH_SMS_AUTH_TOKEN ? "aakash" : "simulation")
-  ).toLowerCase();
+  const provider = getSmsProvider();
   let sent = 0;
   let failed = 0;
 
   if (!preview_only && provider === "aakash") {
     const results = await mapWithConcurrency(tasks, 5, async (task) => {
       try {
-        await sendAakashSms({ to: task.phone, text: task.message });
+        await sendSms({ to: task.phone, text: task.message });
         return { ok: true };
       } catch (e) {
         return { ok: false, error: e.message };

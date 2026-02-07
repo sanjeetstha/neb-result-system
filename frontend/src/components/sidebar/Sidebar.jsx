@@ -38,7 +38,13 @@ import {
  * - variant: "desktop" | "mobile"
  * - collapsed (desktop only)
  */
-export default function Sidebar({ me, onLogout, variant = "desktop", collapsed = false }) {
+export default function Sidebar({
+  me,
+  onLogout,
+  variant = "desktop",
+  collapsed = false,
+  onNavigate,
+}) {
   const location = useLocation();
   const [q, setQ] = useState("");
   const [isSearchFocused, setIsSearchFocused] = useState(false);
@@ -63,6 +69,11 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
 
   const isMobile = variant === "mobile";
   const isCollapsed = isMobile ? false : collapsed;
+  const handleNavigate = () => {
+    if (typeof onNavigate === "function") {
+      onNavigate();
+    }
+  };
 
   // Get role-based menu items - using the same structure as menu.js
   const role = me?.role || "STUDENT";
@@ -71,17 +82,8 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
   const MENUS = {
     SUPER_ADMIN: [
       { label: "Dashboard", path: "/", icon: LayoutDashboard },
-      { label: "Masters", path: "/masters", icon: Building2 },
+      { label: "College", path: "/masters", icon: Building2 },
       { label: "Students", path: "/students", icon: Users },
-      {
-        label: "Users",
-        icon: Users,
-        children: [
-          { label: "Manage Users", path: "/admin/users", icon: Users },
-          { label: "Invites", path: "/admin/invites", icon: Mail },
-          { label: "Add User", path: "/admin/users/new", icon: UserPlus },
-        ],
-      },
       {
         label: "Academics",
         icon: ClipboardList,
@@ -101,6 +103,15 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
           { label: "Marksheet Print", path: "/results/marksheet", icon: Printer },
           { label: "Public Portal", path: "/public", icon: Globe },
           { label: "My Results", path: "/my-results", icon: BadgeCheck },
+        ],
+      },
+      {
+        label: "Users",
+        icon: Users,
+        children: [
+          { label: "Manage Users", path: "/admin/users", icon: Users },
+          { label: "Invites", path: "/admin/invites", icon: Mail },
+          { label: "Add User", path: "/admin/users/new", icon: UserPlus },
         ],
       },
       {
@@ -114,7 +125,7 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
     ],
     ADMIN: [
       { label: "Dashboard", path: "/", icon: LayoutDashboard },
-      { label: "Masters", path: "/masters", icon: Building2 },
+      { label: "College", path: "/masters", icon: Building2 },
       { label: "Students", path: "/students", icon: Users },
       {
         label: "Academics",
@@ -135,6 +146,15 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
           { label: "Marksheet Print", path: "/results/marksheet", icon: Printer },
           { label: "Public Portal", path: "/public", icon: Globe },
           { label: "My Results", path: "/my-results", icon: BadgeCheck },
+        ],
+      },
+      {
+        label: "Users",
+        icon: Users,
+        children: [
+          { label: "Manage Users", path: "/admin/users", icon: Users },
+          { label: "Invites", path: "/admin/invites", icon: Mail },
+          { label: "Add User", path: "/admin/users/new", icon: UserPlus },
         ],
       },
       {
@@ -209,7 +229,13 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
     <div className={cn("px-4 pt-4 transition-all duration-300", isCollapsed && "px-2")}>
       {/* Product + org header with animation */}
       <div className={cn("flex items-center gap-3 transition-all duration-300", isCollapsed && "justify-center")}>
-        <div className="h-10 w-10 rounded-xl border bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center overflow-hidden shadow-sm transition-all duration-300 hover:shadow-md hover:scale-105">
+        <div
+          className="rounded-xl border bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center overflow-hidden shadow-sm transition-all duration-300 hover:shadow-md hover:scale-105"
+          style={{
+            height: Math.max(32, Math.min(64, Number(settings.logo_size) || 44)),
+            width: Math.max(32, Math.min(64, Number(settings.logo_size) || 44)),
+          }}
+        >
           {ORG.logoSrc ? (
             <img src={ORG.logoSrc} alt="Org Logo" className="h-full w-full object-cover" />
           ) : (
@@ -239,23 +265,7 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
       ) : null}
       </div>
 
-      {/* tagline */}
-      {!isCollapsed ? (
-        <div className={cn("mt-2 text-xs animate-fade-in", textMuted)}>{ORG.tagline}</div>
-      ) : null}
-
-      {/* user line */}
-      {!isCollapsed ? (
-        <div className={cn("mt-3 text-xs animate-fade-in", textMuted)}>
-          <span className={cn("font-medium", textBase)}>
-            {me?.full_name || me?.name || "User"}
-          </span>
-          {" • "}
-          <span>{me?.role || "—"}</span>
-        </div>
-      ) : null}
-
-      <div className="mt-4 border-b border-border/50 transition-all duration-300" />
+      <div className="mt-3 border-b border-border/50 transition-all duration-300" />
     </div>
   );
 
@@ -263,9 +273,10 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
     <div
       className={cn(
         "h-full w-full flex flex-col border-r border-border/50 shadow-lg relative overflow-hidden",
-        "transition-all duration-500 ease-in-out",
+        "transition-[opacity,transform] duration-300 ease-in-out",
         isCollapsed ? "w-16" : "w-64",
-        sidebarIsDark && "text-white"
+        sidebarIsDark && "text-white",
+        isMobile && "rounded-r-3xl"
       )}
       style={{
         backgroundImage:
@@ -289,9 +300,9 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
           <div className="relative">
             <Search
               className={cn(
-                "absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 transition-colors duration-200",
+                "absolute left-4 top-1/2 transform -translate-y-1/2 h-4 w-4 transition-colors duration-200",
                 sidebarIsDark ? "text-white/50" : "text-muted-foreground",
-                isSearchFocused && "text-primary"
+                isSearchFocused && "text-accent"
               )}
             />
             <Input
@@ -301,10 +312,10 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
               onBlur={() => setIsSearchFocused(false)}
               placeholder="Search menu..."
               className={cn(
-                "pl-9 transition-all duration-200",
+                "pl-10 rounded-full transition-all duration-200",
                 sidebarIsDark &&
                   "bg-white/10 border-white/10 text-white placeholder:text-white/50 focus-visible:ring-white/30",
-                isSearchFocused && "ring-2 ring-primary/20 shadow-sm"
+                isSearchFocused && "ring-2 ring-accent/20 shadow-sm"
               )}
             />
           </div>
@@ -342,7 +353,7 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
                       }))
                     }
                     className={cn(
-                      "group flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all duration-200 relative overflow-hidden w-full text-left",
+                      "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-200 relative overflow-hidden w-full text-left",
                       itemHover,
                       "hover:translate-x-1 hover:shadow-sm",
                       childActive ? itemActive : textBase,
@@ -406,9 +417,10 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
                           <NavLink
                             key={child.path}
                             to={child.path}
+                            onClick={handleNavigate}
                             className={({ isActive }) =>
                               cn(
-                                "group flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all duration-200 relative overflow-hidden",
+                                "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-200 relative overflow-hidden",
                                 itemHover,
                                 "hover:translate-x-1 hover:shadow-sm",
                                 isActive ? itemActive : textBase,
@@ -468,9 +480,10 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
               <NavLink
                 key={item.path}
                 to={item.path}
+                onClick={handleNavigate}
                 className={({ isActive }) =>
                   cn(
-                    "group flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all duration-200 relative overflow-hidden",
+                    "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-200 relative overflow-hidden",
                     itemHover,
                     "hover:translate-x-1 hover:shadow-sm",
                     isActive ? itemActive : textBase,
@@ -535,10 +548,10 @@ export default function Sidebar({ me, onLogout, variant = "desktop", collapsed =
       {/* footer with enhanced logout button */}
       <div className={cn("p-3 border-t border-border/50 transition-all duration-300", isCollapsed && "p-2")}>
         <Button
-          variant="outline"
+          variant="default"
           className={cn(
-            "w-full justify-start gap-2 transition-all duration-200 hover:shadow-sm border-destructive/30 text-destructive hover:bg-destructive/10",
-            sidebarIsDark && "border-white/20 text-white/90 hover:bg-white/10 hover:text-white",
+            "w-full justify-start gap-2 transition-all duration-200 hover:shadow-sm bg-white text-foreground hover:bg-white/90",
+            sidebarIsDark && "bg-white text-slate-900 hover:bg-white/95",
             isCollapsed && "justify-center"
           )}
           onClick={onLogout}

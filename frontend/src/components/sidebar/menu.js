@@ -12,7 +12,7 @@ import {
 export const MENUS = {
   SUPER_ADMIN: [
     { label: "Dashboard", path: "/", icon: LayoutDashboard },
-    { label: "Masters", path: "/masters", icon: Building2 },
+    { label: "College", path: "/masters", icon: Building2 },
     { label: "Students", path: "/students", icon: Users },
     { label: "Exams", path: "/exams", icon: ClipboardList },
     { label: "Marks Entry", path: "/marks", icon: PencilRuler },
@@ -25,7 +25,7 @@ export const MENUS = {
   ],
   ADMIN: [
     { label: "Dashboard", path: "/", icon: LayoutDashboard },
-    { label: "Masters", path: "/masters", icon: Building2 },
+    { label: "College", path: "/masters", icon: Building2 },
     { label: "Students", path: "/students", icon: Users },
     { label: "Exams", path: "/exams", icon: ClipboardList },
     { label: "Marks Entry", path: "/marks", icon: PencilRuler },

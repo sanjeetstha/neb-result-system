@@ -19,9 +19,9 @@ export const EXAM_PRESETS = {
     key: "PRE_BOARD",
     label: "Pre-Board",
     full: 75,
-    optionalFull: 50,
-    enableIN: true,
-    inFull: 25,
+    optionalFull: 75,
+    enableIN: false,
+    inFull: 0,
   },
   CUSTOM: {
     key: "CUSTOM",

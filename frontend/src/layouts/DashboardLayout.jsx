@@ -57,7 +57,7 @@ export default function DashboardLayout() {
           className={[
             "hidden md:block shrink-0 border-r bg-background",
             "sticky top-[56px] h-[calc(100vh-56px)] overflow-y-auto",
-            "transition-all duration-300",
+            "transition-[width] duration-300 ease-in-out overflow-hidden",
             collapsed ? "w-16" : "w-64",
           ].join(" ")}
         >
@@ -71,8 +71,10 @@ export default function DashboardLayout() {
 
         {/* Mobile sidebar */}
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-          <SheetContent side="left" className="p-0 w-72">
-            <div className="border-b p-4 font-semibold">Menu</div>
+          <SheetContent
+            side="left"
+            className="p-0 w-[64vw] max-w-[360px] min-w-[260px] rounded-r-3xl border border-white/20 bg-white/10 backdrop-blur-2xl shadow-2xl"
+          >
             <Sidebar
               me={me}
               onLogout={() => {
@@ -80,6 +82,9 @@ export default function DashboardLayout() {
                 onLogout();
               }}
               variant="mobile"
+              onNavigate={() => {
+                setTimeout(() => setMobileOpen(false), 500);
+              }}
             />
           </SheetContent>
         </Sheet>

@@ -9,18 +9,20 @@ const DEFAULTS = {
   logo_data_url: "",
   logo_small_data_url: "",
   favicon_data_url: "",
-  // Default palette inspired by ColorHunt (amber + navy)
-  primary_color: "#155263",
-  accent_color: "#ff6f3c",
-  sidebar_color: "#155263",
+  logo_size: 44,
+  logo_small_size: 28,
+  // Default palette from ColorHunt
+  primary_color: "#0c2c55",
+  accent_color: "#629fad",
+  sidebar_color: "#0c2c55",
   header_style: "glass", // glass | solid
   notice_enabled: true,
   notice_text: "Welcome to NEB Result System • Publish results with confidence •",
   notice_speed: 28,
   notice_style: "gradient", // solid | gradient
-  notice_bg_color: "#ffc93c",
-  notice_accent_color: "#ff6f3c",
-  notice_text_color: "#155263",
+  notice_bg_color: "#ededce",
+  notice_accent_color: "#629fad",
+  notice_text_color: "#0c2c55",
   notifications_enabled: true,
 };
 

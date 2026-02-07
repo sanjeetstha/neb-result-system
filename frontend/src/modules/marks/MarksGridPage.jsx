@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -65,10 +65,14 @@ function PreviewKV({ label, value }) {
 export default function MarksGridPage() {
   const [examId, setExamId] = useState("");
   const [sectionId, setSectionId] = useState("");
+  const [viewMode, setViewMode] = useState("ledger");
 
   const [marksByEnrollment, setMarksByEnrollment] = useState({});
   const [ledgerByEnrollment, setLedgerByEnrollment] = useState({});
   const [loadingLedgers, setLoadingLedgers] = useState(false);
+  const [optionalByEnrollment, setOptionalByEnrollment] = useState({});
+  const [studentEdits, setStudentEdits] = useState({});
+  const studentBaselineRef = useRef({});
 
   const [savingAll, setSavingAll] = useState(false);
   const [saveAllProgress, setSaveAllProgress] = useState({ done: 0, total: 0 });
@@ -90,8 +94,11 @@ export default function MarksGridPage() {
   // ✅ Sticky sizes (Actions smaller)
   const STICKY = {
     SYMBOL_W: 140,
-    STUDENT_W: 260,
-    ACTION_W: 240,
+    REGD_W: 150,
+    DOB_W: 140,
+    STUDENT_W: 240,
+    ACTION_W: 220,
+    TOTAL_W: 140,
   };
 
   // ✅ Preview dialog state
@@ -132,6 +139,92 @@ export default function MarksGridPage() {
     selectedExam?.is_published ||
     selectedExam?.is_locked
   );
+
+  // ---------------- EXAM COMPONENT GROUPS (for Ledger view) ----------------
+  const examComponentsQ = useQuery({
+    queryKey: ["exams", "components", examId],
+    enabled: !!examId,
+    queryFn: async () => {
+      const res = await api.get(`/api/exams/${examId}/components`);
+      return res.data || {};
+    },
+    staleTime: 30_000,
+  });
+
+  const examGroups = useMemo(
+    () => (Array.isArray(examComponentsQ.data?.groups) ? examComponentsQ.data.groups : []),
+    [examComponentsQ.data]
+  );
+
+  const compulsoryCols = useMemo(() => {
+    const group = examGroups.find(
+      (g) => String(g.name || "").trim().toLowerCase() === "compulsory"
+    );
+    const subjects = group?.subjects || [];
+    return subjects
+      .map((s) => {
+        const th =
+          (s.components || []).find(
+            (c) => c.component_type === "TH" && c.is_enabled
+          ) || null;
+        if (!th) return null;
+        return {
+          subject_id: s.id,
+          label: s.name,
+          component_code: String(th.component_code || "").trim(),
+          full_marks: th.full_marks ?? null,
+        };
+      })
+      .filter(Boolean);
+  }, [examGroups]);
+
+  const optionalGroups = useMemo(() => {
+    return examGroups
+      .filter((g) => String(g.name || "").toLowerCase().startsWith("opt"))
+      .map((g) => ({
+        name: g.name,
+        subjects: (g.subjects || [])
+          .map((s) => {
+            const th =
+              (s.components || []).find(
+                (c) => c.component_type === "TH" && c.is_enabled
+              ) || null;
+            if (!th) return null;
+            return {
+              subject_id: s.id,
+              subject_name: s.name,
+              component_code: String(th.component_code || "").trim(),
+              full_marks: th.full_marks ?? null,
+            };
+          })
+          .filter(Boolean),
+      }));
+  }, [examGroups]);
+
+  const optionalCodeMap = useMemo(() => {
+    const map = new Map();
+    for (const g of optionalGroups) {
+      for (const s of g.subjects || []) {
+        if (!s?.component_code) continue;
+        map.set(String(s.component_code), {
+          ...s,
+          group_name: g.name,
+        });
+      }
+    }
+    return map;
+  }, [optionalGroups]);
+
+  const subjectIdToOptionalGroup = useMemo(() => {
+    const map = new Map();
+    for (const g of optionalGroups) {
+      for (const s of g.subjects || []) {
+        if (!s?.subject_id) continue;
+        if (!map.has(s.subject_id)) map.set(s.subject_id, g.name);
+      }
+    }
+    return map;
+  }, [optionalGroups]);
 
   // ---------------- SECTIONS ----------------
   const sectionsQ = useQuery({
@@ -176,10 +269,31 @@ export default function MarksGridPage() {
     return Array.isArray(arr) ? arr : [];
   }, [studentsQ.data]);
 
+  useEffect(() => {
+    if (!students.length) {
+      setStudentEdits({});
+      studentBaselineRef.current = {};
+      return;
+    }
+    const init = {};
+    for (const s of students) {
+      init[s.enrollment_id] = {
+        full_name: s.full_name || "",
+        symbol_no: s.symbol_no || "",
+        regd_no: s.regd_no || "",
+        dob: s.dob ? String(s.dob).slice(0, 10) : "",
+      };
+    }
+    setStudentEdits(init);
+    studentBaselineRef.current = JSON.parse(JSON.stringify(init));
+  }, [students]);
+
   // reset when selection changes
   useEffect(() => {
     setLedgerByEnrollment({});
     setMarksByEnrollment({});
+    setOptionalByEnrollment({});
+    setStudentEdits({});
     setPreviewOpen(false);
     setPreviewStudent(null);
     setPreviewData(null);
@@ -189,6 +303,7 @@ export default function MarksGridPage() {
     setImportFile(null);
     setImportSummary(null);
     baselineRef.current = {};
+    studentBaselineRef.current = {};
   }, [examId, sectionId]);
 
   // ---------------- LOAD LEDGERS FOR ALL STUDENTS ----------------
@@ -225,6 +340,22 @@ export default function MarksGridPage() {
       // ✅ set baseline for dirty tracking
       baselineRef.current = JSON.parse(JSON.stringify(marksInit));
 
+      // ✅ optional code defaults (from existing ledger choices)
+      const optInit = {};
+      for (const [enrollment_id, ledger] of Object.entries(ledgers)) {
+        const optRow = {};
+        for (const item of ledger || []) {
+          if (!item?.enabled_in_exam) continue;
+          if (String(item.component_type || "").toUpperCase() !== "TH") continue;
+          const groupName = subjectIdToOptionalGroup.get(item.subject_id);
+          if (groupName && !optRow[groupName]) {
+            optRow[groupName] = String(item.component_code || "");
+          }
+        }
+        optInit[enrollment_id] = optRow;
+      }
+      setOptionalByEnrollment(optInit);
+
       toast.success("Ledgers loaded for section");
     } catch (e) {
       toast.error(e?.response?.data?.message || e.message || "Failed to load ledgers");
@@ -238,6 +369,25 @@ export default function MarksGridPage() {
     loadLedgers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canLoad]);
+
+  useEffect(() => {
+    if (!Object.keys(ledgerByEnrollment || {}).length) return;
+    if (!subjectIdToOptionalGroup || subjectIdToOptionalGroup.size === 0) return;
+    const optInit = {};
+    for (const [enrollment_id, ledger] of Object.entries(ledgerByEnrollment)) {
+      const optRow = {};
+      for (const item of ledger || []) {
+        if (!item?.enabled_in_exam) continue;
+        if (String(item.component_type || "").toUpperCase() !== "TH") continue;
+        const groupName = subjectIdToOptionalGroup.get(item.subject_id);
+        if (groupName && !optRow[groupName]) {
+          optRow[groupName] = String(item.component_code || "");
+        }
+      }
+      optInit[enrollment_id] = optRow;
+    }
+    setOptionalByEnrollment(optInit);
+  }, [ledgerByEnrollment, subjectIdToOptionalGroup]);
 
   // ---------------- BUILD FLAT COLUMNS ----------------
   const columns = useMemo(() => {
@@ -406,15 +556,107 @@ export default function MarksGridPage() {
     }
   };
 
+  const buildLedgerMarks = (enrollment_id) => {
+    const row = marksByEnrollment[enrollment_id] || {};
+    const items = [];
+
+    for (const c of compulsoryCols) {
+      if (!c?.component_code) continue;
+      const val = row[c.component_code];
+      const raw = val == null ? "" : val;
+      items.push({
+        component_code: c.component_code,
+        marks_obtained: raw === "" ? null : Number(raw),
+      });
+    }
+
+    for (const g of optionalGroups) {
+      const code = (optionalByEnrollment?.[enrollment_id] || {})[g.name];
+      if (!code) continue;
+      const val = row[code];
+      const raw = val == null ? "" : val;
+      items.push({
+        component_code: code,
+        marks_obtained: raw === "" ? null : Number(raw),
+      });
+    }
+
+    return items;
+  };
+
+  const buildDetailedMarks = (enrollment_id) => {
+    const row = marksByEnrollment[enrollment_id] || {};
+    return Object.entries(row).map(([component_code, value]) => ({
+      component_code,
+      marks_obtained: value == null || value === "" ? null : Number(value),
+    }));
+  };
+
+  const buildOptionalChoices = (enrollment_id) => {
+    const choices = [];
+    const errors = [];
+    for (const g of optionalGroups) {
+      const code = (optionalByEnrollment?.[enrollment_id] || {})[g.name];
+      if (!code) continue;
+      const meta = optionalCodeMap.get(String(code));
+      if (!meta?.subject_id) {
+        errors.push(`Invalid optional code ${code} for ${g.name}`);
+        continue;
+      }
+      choices.push({ group_name: g.name, subject_id: meta.subject_id });
+    }
+    return { choices, errors };
+  };
+
+  const getStudentEdit = (enrollment_id) => studentEdits?.[enrollment_id] || {};
+
+  const studentNeedsUpdate = (enrollment_id) => {
+    const current = getStudentEdit(enrollment_id);
+    const base = studentBaselineRef.current?.[enrollment_id] || {};
+    return (
+      String(current.full_name || "") !== String(base.full_name || "") ||
+      String(current.symbol_no || "") !== String(base.symbol_no || "") ||
+      String(current.regd_no || "") !== String(base.regd_no || "") ||
+      String(current.dob || "") !== String(base.dob || "")
+    );
+  };
+
   // ---------------- SAVE ONE ----------------
   const saveOne = useMutation({
-    mutationFn: async ({ enrollment_id }) => {
-      const row = marksByEnrollment[enrollment_id] || {};
-      const items = Object.entries(row).map(([component_code, value]) => ({
-        component_code,
-        marks: value === "" ? null : Number(value),
-      }));
-      const payload = { marks: items, items, by_code: row };
+    mutationFn: async ({ enrollment_id, student }) => {
+      if (viewMode === "ledger") {
+        if (student && studentNeedsUpdate(enrollment_id)) {
+          const current = getStudentEdit(enrollment_id);
+          if (!current.full_name || !current.symbol_no) {
+            throw new Error("Full name and symbol number required");
+          }
+          await api.put(`/api/students/${student.student_id}`, {
+            full_name: current.full_name,
+            symbol_no: current.symbol_no,
+            regd_no: current.regd_no || null,
+            roll_no: student.roll_no || null,
+            dob: current.dob || null,
+          });
+          studentBaselineRef.current = {
+            ...studentBaselineRef.current,
+            [enrollment_id]: { ...current },
+          };
+        }
+
+        const { choices, errors } = buildOptionalChoices(enrollment_id);
+        if (errors.length) {
+          throw new Error(errors[0]);
+        }
+        if (choices.length) {
+          await api.post(`/api/students/${enrollment_id}/optional-choices`, { choices });
+        }
+      }
+
+      const items =
+        viewMode === "ledger"
+          ? buildLedgerMarks(enrollment_id)
+          : buildDetailedMarks(enrollment_id);
+      const payload = { marks: items };
       const res = await api.post(`/api/marks/${examId}/enrollments/${enrollment_id}`, payload);
       return { data: res.data, enrollment_id };
     },
@@ -441,12 +683,37 @@ export default function MarksGridPage() {
         const eid = s.enrollment_id;
 
         try {
-          const row = marksByEnrollment[eid] || {};
-          const items = Object.entries(row).map(([component_code, value]) => ({
-            component_code,
-            marks: value === "" ? null : Number(value),
-          }));
-          const payload = { marks: items, items, by_code: row };
+          if (viewMode === "ledger") {
+            if (studentNeedsUpdate(eid)) {
+              const current = getStudentEdit(eid);
+              if (!current.full_name || !current.symbol_no) {
+                throw new Error("Full name and symbol number required");
+              }
+              await api.put(`/api/students/${s.student_id}`, {
+                full_name: current.full_name,
+                symbol_no: current.symbol_no,
+                regd_no: current.regd_no || null,
+                roll_no: s.roll_no || null,
+                dob: current.dob || null,
+              });
+              studentBaselineRef.current = {
+                ...studentBaselineRef.current,
+                [eid]: { ...current },
+              };
+            }
+
+            const { choices, errors } = buildOptionalChoices(eid);
+            if (errors.length) throw new Error(errors[0]);
+            if (choices.length) {
+              await api.post(`/api/students/${eid}/optional-choices`, { choices });
+            }
+          }
+
+          const items =
+            viewMode === "ledger"
+              ? buildLedgerMarks(eid)
+              : buildDetailedMarks(eid);
+          const payload = { marks: items };
           await api.post(`/api/marks/${examId}/enrollments/${eid}`, payload);
 
           // ✅ mark saved baseline
@@ -524,16 +791,28 @@ export default function MarksGridPage() {
       setImportSummary(data);
       setImportFile(null);
       toast.success(`Imported ${data?.imported || 0} rows`);
-      if (sectionId) loadLedgers();
+      if (sectionId) {
+        loadLedgers();
+        studentsQ.refetch?.();
+      }
     },
     onError: (e) =>
       toast.error(e?.response?.data?.message || e.message || "Import failed"),
   });
 
   const onImport = () => {
-    if (!examId) return toast.error("Select exam first");
-    if (isLocked) return toast.error("Exam is locked/published. Import disabled.");
-    if (!importFile) return toast.error("Choose a file to import");
+    if (!examId) {
+      toast.error("Select exam first");
+      return;
+    }
+    if (isLocked) {
+      toast.error("Exam is locked/published. Import disabled.");
+      return;
+    }
+    if (!importFile) {
+      toast.error("Choose a file to import");
+      return;
+    }
     importMutation.mutate(importFile);
   };
 
@@ -552,6 +831,51 @@ export default function MarksGridPage() {
       next[enrollment_id] = row;
       return next;
     });
+  };
+
+  const setStudentField = (enrollment_id, field, value) => {
+    setStudentEdits((prev) => ({
+      ...prev,
+      [enrollment_id]: {
+        ...(prev[enrollment_id] || {}),
+        [field]: value,
+      },
+    }));
+  };
+
+  const setOptionalCode = (enrollment_id, groupName, value) => {
+    const nextCode = String(value ?? "").trim();
+    const prevCode = (optionalByEnrollment?.[enrollment_id] || {})[groupName];
+    setOptionalByEnrollment((prev) => {
+      const row = { ...(prev[enrollment_id] || {}) };
+      row[groupName] = nextCode;
+      return { ...prev, [enrollment_id]: row };
+    });
+
+    // remove marks for old optional code if code changed
+    setMarksByEnrollment((prev) => {
+      const row = { ...(prev[enrollment_id] || {}) };
+      if (prevCode && prevCode !== nextCode) {
+        delete row[prevCode];
+      }
+      return { ...prev, [enrollment_id]: row };
+    });
+  };
+
+  const getRowTotal = (enrollment_id) => {
+    const row = marksByEnrollment?.[enrollment_id] || {};
+    let sum = 0;
+    for (const c of compulsoryCols) {
+      const v = Number(row[c.component_code]);
+      if (Number.isFinite(v)) sum += v;
+    }
+    for (const g of optionalGroups) {
+      const code = (optionalByEnrollment?.[enrollment_id] || {})[g.name];
+      if (!code) continue;
+      const v = Number(row[code]);
+      if (Number.isFinite(v)) sum += v;
+    }
+    return sum > 0 ? Number(sum.toFixed(2)) : "";
   };
 
   // ---------------- PREVIEW MUTATION ----------------
@@ -626,7 +950,7 @@ export default function MarksGridPage() {
       <div>
         <h2 className="text-lg font-semibold">Marks Entry (Bulk Grid)</h2>
         <p className="text-sm text-muted-foreground">
-          Section-wise bulk marks entry. Subject-wise grouped columns.
+          Section-wise bulk marks entry with a simplified Mark Ledger view.
         </p>
       </div>
 
@@ -669,9 +993,31 @@ export default function MarksGridPage() {
 
               <Badge variant="outline">Students: {studentsQ.isLoading ? "…" : students.length}</Badge>
               <Badge variant="outline">Visible: {visibleStudents.length}</Badge>
-              <Badge variant="outline">
-                Columns: {visibleColumns.length}/{columns.length}
-              </Badge>
+              {viewMode === "detailed" ? (
+                <Badge variant="outline">
+                  Columns: {visibleColumns.length}/{columns.length}
+                </Badge>
+              ) : (
+                <Badge variant="outline">
+                  Subjects: {compulsoryCols.length} • Optional groups: {optionalGroups.length}
+                </Badge>
+              )}
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant={viewMode === "ledger" ? "secondary" : "outline"}
+                  onClick={() => setViewMode("ledger")}
+                >
+                  Ledger View
+                </Button>
+                <Button
+                  size="sm"
+                  variant={viewMode === "detailed" ? "secondary" : "outline"}
+                  onClick={() => setViewMode("detailed")}
+                >
+                  Detailed View
+                </Button>
+              </div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
@@ -684,28 +1030,32 @@ export default function MarksGridPage() {
                 />
               </div>
 
-              <div className="w-full sm:w-[260px]">
-                <Input
-                  value={columnQuery}
-                  onChange={(e) => setColumnQuery(e.target.value)}
-                  placeholder="Filter columns..."
-                />
-              </div>
-
-              <div className="flex items-center gap-2">
-                {["TH", "IN", "PR"].map((t) => (
-                  <label key={t} className="text-xs flex items-center gap-1">
-                    <input
-                      type="checkbox"
-                      checked={!!columnTypes[t]}
-                      onChange={(e) =>
-                        setColumnTypes((p) => ({ ...p, [t]: e.target.checked }))
-                      }
+              {viewMode === "detailed" ? (
+                <>
+                  <div className="w-full sm:w-[260px]">
+                    <Input
+                      value={columnQuery}
+                      onChange={(e) => setColumnQuery(e.target.value)}
+                      placeholder="Filter columns..."
                     />
-                    {t}
-                  </label>
-                ))}
-              </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {["TH", "IN", "PR"].map((t) => (
+                      <label key={t} className="text-xs flex items-center gap-1">
+                        <input
+                          type="checkbox"
+                          checked={!!columnTypes[t]}
+                          onChange={(e) =>
+                            setColumnTypes((p) => ({ ...p, [t]: e.target.checked }))
+                          }
+                        />
+                        {t}
+                      </label>
+                    ))}
+                  </div>
+                </>
+              ) : null}
 
               <Button
                 variant="outline"
@@ -753,16 +1103,27 @@ export default function MarksGridPage() {
             <div>
               <div className="text-sm font-medium">Import Marks (Excel/CSV)</div>
               <div className="text-xs text-muted-foreground">
-                Use the fixed template with columns: symbol_no, component_code, marks_obtained, is_absent.
+                Use the Mark Ledger template (Symbol, Regd, DOB, compulsory + optional codes).
+                You can also import the simple template with: symbol_no, component_code, marks_obtained.
               </div>
             </div>
-            <a
-              href="/marks_import_template.csv"
-              download
-              className="text-xs text-primary underline"
-            >
-              Download template
-            </a>
+            <div className="flex items-center gap-3">
+              <a
+                href={`${api.defaults.baseURL || ""}/api/import/marks-ledger-template${
+                  examId ? `?exam_id=${encodeURIComponent(examId)}` : ""
+                }`}
+                className="text-xs text-primary underline"
+              >
+                Download Mark Ledger template
+              </a>
+              <a
+                href="/marks_import_template.csv"
+                download
+                className="text-xs text-muted-foreground underline"
+              >
+                Simple CSV template
+              </a>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_auto]">
@@ -777,7 +1138,7 @@ export default function MarksGridPage() {
             />
             <Button
               onClick={onImport}
-              disabled={!examId || !importFile || importMutation.isPending || isLocked}
+              disabled={!importFile || importMutation.isPending}
             >
               {importMutation.isPending ? "Importing..." : "Import Marks"}
             </Button>
@@ -831,6 +1192,351 @@ export default function MarksGridPage() {
             <div className="text-sm text-muted-foreground">Loading students/ledgers...</div>
           ) : students.length === 0 ? (
             <div className="text-sm text-muted-foreground">No students found in this section.</div>
+          ) : visibleStudents.length === 0 ? (
+            <div className="text-sm text-muted-foreground">
+              No match for: <span className="font-medium">{studentQuery}</span>
+            </div>
+          ) : viewMode === "ledger" ? (
+            examComponentsQ.isLoading ? (
+              <div className="text-sm text-muted-foreground">Loading subjects...</div>
+            ) : compulsoryCols.length === 0 ? (
+              <div className="text-sm text-muted-foreground">
+                No compulsory subjects configured. Configure exam components first.
+              </div>
+            ) : (
+              <div className="w-full">
+                <div className="relative w-full overflow-x-auto overflow-y-auto max-h-[72vh] rounded-md border">
+                  <table className="min-w-max w-max text-sm">
+                    <thead className="bg-muted sticky top-0 z-30">
+                      <tr>
+                        <th
+                          className="p-2 text-left bg-muted border-r shadow-sm"
+                          style={{
+                            position: "sticky",
+                            left: 0,
+                            zIndex: 70,
+                            width: STICKY.SYMBOL_W,
+                            minWidth: STICKY.SYMBOL_W,
+                          }}
+                        >
+                          Symbol No.
+                        </th>
+                        <th
+                          className="p-2 text-left bg-muted border-r shadow-sm"
+                          style={{
+                            position: "sticky",
+                            left: STICKY.SYMBOL_W,
+                            zIndex: 70,
+                            width: STICKY.REGD_W,
+                            minWidth: STICKY.REGD_W,
+                          }}
+                        >
+                          Regd. No.
+                        </th>
+                        <th
+                          className="p-2 text-left bg-muted border-r shadow-sm"
+                          style={{
+                            position: "sticky",
+                            left: STICKY.SYMBOL_W + STICKY.REGD_W,
+                            zIndex: 70,
+                            width: STICKY.DOB_W,
+                            minWidth: STICKY.DOB_W,
+                          }}
+                        >
+                          DOB
+                        </th>
+                        <th
+                          className="p-2 text-left bg-muted border-r shadow-sm"
+                          style={{
+                            position: "sticky",
+                            left: STICKY.SYMBOL_W + STICKY.REGD_W + STICKY.DOB_W,
+                            zIndex: 70,
+                            width: STICKY.STUDENT_W,
+                            minWidth: STICKY.STUDENT_W,
+                          }}
+                        >
+                          Name
+                        </th>
+
+                        {compulsoryCols.map((c) => (
+                          <th key={c.component_code} className="p-2 text-center border-l">
+                            <div className="font-semibold">{c.label}</div>
+                            <div className="text-[10px] text-muted-foreground">TH</div>
+                          </th>
+                        ))}
+
+                        {optionalGroups.map((g) => (
+                          <Fragment key={g.name}>
+                            <th className="p-2 text-center border-l">
+                              <div className="font-semibold">{g.name}</div>
+                              <div className="text-[10px] text-muted-foreground">Sub. Code</div>
+                            </th>
+                            <th className="p-2 text-center border-l">
+                              <div className="font-semibold">{g.name}</div>
+                              <div className="text-[10px] text-muted-foreground">TH</div>
+                            </th>
+                          </Fragment>
+                        ))}
+
+                        <th className="p-2 text-center border-l" style={{ minWidth: STICKY.TOTAL_W }}>
+                          Grand Total
+                        </th>
+
+                        <th
+                          className="p-2 text-right bg-muted border-l shadow-sm"
+                          style={{
+                            position: "sticky",
+                            right: 0,
+                            zIndex: 70,
+                            width: STICKY.ACTION_W,
+                            minWidth: STICKY.ACTION_W,
+                          }}
+                        >
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleStudents.map((s, rowIndex) => {
+                        const eid = s.enrollment_id;
+                        const row = marksByEnrollment[eid] || {};
+                        const edits = studentEdits[eid] || {};
+                        const leftSymbol = 0;
+                        const leftRegd = STICKY.SYMBOL_W;
+                        const leftDob = STICKY.SYMBOL_W + STICKY.REGD_W;
+                        const leftName = STICKY.SYMBOL_W + STICKY.REGD_W + STICKY.DOB_W;
+
+                        return (
+                          <tr key={eid} className={rowIndex % 2 ? "bg-muted/20" : ""}>
+                            <td
+                              className="p-2 bg-background border-r shadow-sm"
+                              style={{
+                                position: "sticky",
+                                left: leftSymbol,
+                                zIndex: 20,
+                                width: STICKY.SYMBOL_W,
+                                minWidth: STICKY.SYMBOL_W,
+                              }}
+                            >
+                              <Input
+                                className="h-8"
+                                value={edits.symbol_no || ""}
+                                onChange={(e) =>
+                                  setStudentField(eid, "symbol_no", e.target.value)
+                                }
+                              />
+                            </td>
+                            <td
+                              className="p-2 bg-background border-r shadow-sm"
+                              style={{
+                                position: "sticky",
+                                left: leftRegd,
+                                zIndex: 20,
+                                width: STICKY.REGD_W,
+                                minWidth: STICKY.REGD_W,
+                              }}
+                            >
+                              <Input
+                                className="h-8"
+                                value={edits.regd_no || ""}
+                                onChange={(e) =>
+                                  setStudentField(eid, "regd_no", e.target.value)
+                                }
+                              />
+                            </td>
+                            <td
+                              className="p-2 bg-background border-r shadow-sm"
+                              style={{
+                                position: "sticky",
+                                left: leftDob,
+                                zIndex: 20,
+                                width: STICKY.DOB_W,
+                                minWidth: STICKY.DOB_W,
+                              }}
+                            >
+                              <Input
+                                className="h-8"
+                                type="date"
+                                value={edits.dob || ""}
+                                onChange={(e) =>
+                                  setStudentField(eid, "dob", e.target.value)
+                                }
+                              />
+                            </td>
+                            <td
+                              className="p-2 bg-background border-r shadow-sm"
+                              style={{
+                                position: "sticky",
+                                left: leftName,
+                                zIndex: 20,
+                                width: STICKY.STUDENT_W,
+                                minWidth: STICKY.STUDENT_W,
+                              }}
+                            >
+                              <Input
+                                className="h-8"
+                                value={edits.full_name || ""}
+                                onChange={(e) =>
+                                  setStudentField(eid, "full_name", e.target.value)
+                                }
+                              />
+                            </td>
+
+                            {compulsoryCols.map((c) => {
+                              const v = row[c.component_code] ?? "";
+                              const full = c.full_marks ?? getFullMarks(eid, c.component_code);
+                              const isInvalid =
+                                v !== "" &&
+                                full != null &&
+                                Number(v) > Number(full);
+                              return (
+                                <td key={c.component_code} className="p-2 border-l">
+                                  <Input
+                                    className="h-8"
+                                    value={v}
+                                    placeholder={full != null ? `0-${full}` : "marks"}
+                                    onChange={(e) => {
+                                      const val = safeNum(e.target.value);
+                                      setMark(eid, c.component_code, val === "" ? "" : String(val));
+                                    }}
+                                  />
+                                  {isInvalid ? (
+                                    <div className="text-[10px] text-destructive mt-1">
+                                      Invalid
+                                    </div>
+                                  ) : null}
+                                </td>
+                              );
+                            })}
+
+                            {optionalGroups.map((g) => {
+                              const optCode =
+                                (optionalByEnrollment?.[eid] || {})[g.name] || "";
+                              const meta = optionalCodeMap.get(String(optCode));
+                              const listId = `opt-${String(g.name || "")
+                                .toLowerCase()
+                                .replace(/[^a-z0-9]+/g, "-")}`;
+                              const optMarks = optCode ? row[optCode] ?? "" : "";
+                              const full = meta?.full_marks ?? getFullMarks(eid, optCode);
+                              const isInvalid =
+                                optMarks !== "" &&
+                                full != null &&
+                                Number(optMarks) > Number(full);
+
+                              return (
+                                <Fragment key={g.name}>
+                                  <td className="p-2 border-l">
+                                    <Input
+                                      className="h-8"
+                                      list={listId}
+                                      value={optCode}
+                                      placeholder="Code"
+                                      onChange={(e) =>
+                                        setOptionalCode(eid, g.name, e.target.value)
+                                      }
+                                    />
+                                    <datalist id={listId}>
+                                      {g.subjects.map((s) => (
+                                        <option
+                                          key={`${g.name}-${s.component_code}`}
+                                          value={s.component_code}
+                                        >
+                                          {s.subject_name}
+                                        </option>
+                                      ))}
+                                    </datalist>
+                                    {meta ? (
+                                      <div className="text-[10px] text-muted-foreground mt-1">
+                                        {meta.subject_name}
+                                      </div>
+                                    ) : null}
+                                  </td>
+                                  <td className="p-2 border-l">
+                                    <Input
+                                      className="h-8"
+                                      disabled={!optCode}
+                                      value={optMarks}
+                                      placeholder={full != null ? `0-${full}` : "marks"}
+                                      onChange={(e) => {
+                                        const val = safeNum(e.target.value);
+                                        if (!optCode) return;
+                                        setMark(eid, optCode, val === "" ? "" : String(val));
+                                      }}
+                                    />
+                                    {isInvalid ? (
+                                      <div className="text-[10px] text-destructive mt-1">
+                                        Invalid
+                                      </div>
+                                    ) : null}
+                                  </td>
+                                </Fragment>
+                              );
+                            })}
+
+                            <td className="p-2 text-center border-l font-medium">
+                              {getRowTotal(eid) || "—"}
+                            </td>
+
+                            <td
+                              className="p-2 text-right bg-background border-l shadow-sm"
+                              style={{
+                                position: "sticky",
+                                right: 0,
+                                zIndex: 20,
+                                width: STICKY.ACTION_W,
+                                minWidth: STICKY.ACTION_W,
+                              }}
+                            >
+                              <div className="flex justify-end gap-1 flex-wrap">
+                                <Button
+                                  size="sm"
+                                  className="h-8 px-2"
+                                  disabled={isLocked || saveOne.isPending}
+                                  onClick={() =>
+                                    saveOne.mutate({ enrollment_id: eid, student: s })
+                                  }
+                                >
+                                  Save
+                                </Button>
+
+                                <Button
+                                  size="sm"
+                                  className="h-8 px-2"
+                                  variant="outline"
+                                  disabled={!examId || previewMutation.isPending}
+                                  onClick={() => openPreview(s)}
+                                >
+                                  {previewStudent?.enrollment_id === eid &&
+                                  previewMutation.isPending
+                                    ? "Loading..."
+                                    : "Preview"}
+                                </Button>
+
+                                <Button
+                                  size="sm"
+                                  className="h-8 px-2"
+                                  variant="secondary"
+                                  disabled={!examId || isLocked || generateMutation.isPending}
+                                  onClick={() => generateOne(s)}
+                                >
+                                  {generateMutation.isPending ? "Generating..." : "Generate"}
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+
+                  <Separator />
+                  <div className="p-3 text-xs text-muted-foreground">
+                    Notes: Optional codes set the student’s optional subjects. Save rows after
+                    entering codes and marks.
+                  </div>
+                </div>
+              </div>
+            )
           ) : columns.length === 0 ? (
             <div className="text-sm text-muted-foreground">
               No enabled components found for this exam. Configure exam components first.
@@ -839,10 +1545,6 @@ export default function MarksGridPage() {
             <div className="text-sm text-muted-foreground">
               No columns match filter:{" "}
               <span className="font-medium">{columnQuery || "—"}</span>
-            </div>
-          ) : visibleStudents.length === 0 ? (
-            <div className="text-sm text-muted-foreground">
-              No match for: <span className="font-medium">{studentQuery}</span>
             </div>
           ) : (
             <div className="w-full">
@@ -1073,7 +1775,9 @@ export default function MarksGridPage() {
                                 size="sm"
                                 className="h-8 px-2"
                                 disabled={isLocked || saveOne.isPending}
-                                onClick={() => saveOne.mutate({ enrollment_id: eid })}
+                                onClick={() =>
+                                  saveOne.mutate({ enrollment_id: eid, student: s })
+                                }
                               >
                                 Save
                               </Button>
