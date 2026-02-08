@@ -34,7 +34,7 @@ export default function CorrectionsPage() {
 
   const [tab, setTab] = useState("REQUEST"); // REQUEST | REVIEW | MINE
   const [examId, setExamId] = useState("");
-  const [sectionId, setSectionId] = useState("");
+  const [batchId, setBatchId] = useState("");
   const [enrollmentId, setEnrollmentId] = useState("");
   const [componentCode, setComponentCode] = useState("");
   const [newMarks, setNewMarks] = useState("");
@@ -60,36 +60,33 @@ export default function CorrectionsPage() {
     }));
   }, [examsQ.data]);
 
-  const sectionsQ = useQuery({
-    queryKey: ["masters", "sections"],
+  const batchesQ = useQuery({
+    queryKey: ["masters", "batches"],
     queryFn: async () => {
-      const res = await api.get("/api/masters/sections");
-      const data = res.data?.sections ?? res.data?.data ?? res.data ?? [];
+      const res = await api.get("/api/masters/batches");
+      const data = res.data?.batches ?? res.data?.data ?? res.data ?? [];
       return Array.isArray(data) ? data : [];
     },
     staleTime: 30_000,
   });
 
-  const sectionOptions = useMemo(() => {
-    const arr = sectionsQ.data || [];
-    return arr.map((s) => {
-      const id = String(s.id ?? s.section_id ?? "");
-      const name = s.name ?? s.section_name ?? "";
-      const campus = s.campus_code || s.campus?.code || "";
-      const faculty = s.faculty_code || s.faculty?.code || "";
-      const year = s.year_bs || s.academic_year?.year_bs || "";
-      const cls = s.class_name || s.class?.name || s.class_id || "";
-      const label = [campus, year, cls, faculty, name].filter(Boolean).join(" • ");
-      return { value: id, label: label || `Section #${id}` };
+  const batchOptions = useMemo(() => {
+    const arr = batchesQ.data || [];
+    return arr.map((b) => {
+      const id = String(b.id ?? b.batch_id ?? "");
+      const name = b.name ?? "";
+      const year = b.year_bs ?? "";
+      const label = [name, year ? `(${year})` : ""].filter(Boolean).join(" ");
+      return { value: id, label: label || `Batch #${id}` };
     });
-  }, [sectionsQ.data]);
+  }, [batchesQ.data]);
 
   const studentsQ = useQuery({
-    queryKey: ["students", "list", sectionId],
-    enabled: !!sectionId,
+    queryKey: ["students", "list", batchId],
+    enabled: !!batchId,
     queryFn: async () => {
       const res = await api.get(
-        `/api/students?section_id=${encodeURIComponent(sectionId)}`
+        `/api/students?batch_id=${encodeURIComponent(batchId)}`
       );
       const data = res.data?.students ?? res.data?.data ?? res.data ?? [];
       return Array.isArray(data) ? data : [];
@@ -254,18 +251,18 @@ export default function CorrectionsPage() {
                 placeholder={examsQ.isLoading ? "Loading exams..." : "Select exam"}
               />
               <Select
-                label="Section"
-                value={sectionId}
-                onChange={setSectionId}
-                options={sectionOptions}
-                placeholder={sectionsQ.isLoading ? "Loading sections..." : "Select section"}
+                label="Batch"
+                value={batchId}
+                onChange={setBatchId}
+                options={batchOptions}
+                placeholder={batchesQ.isLoading ? "Loading batches..." : "Select batch"}
               />
               <Select
                 label="Student"
                 value={enrollmentId}
                 onChange={setEnrollmentId}
                 options={studentOptions}
-                placeholder={!sectionId ? "Select section first" : "Select student"}
+                placeholder={!batchId ? "Select batch first" : "Select student"}
               />
             </div>
 

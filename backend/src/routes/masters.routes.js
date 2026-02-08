@@ -9,6 +9,8 @@ const {
   updateFaculty,
   listClasses,
   listGradingSchemes,
+  listBatches, createBatch,
+  updateBatch,
   listSections, createSection,
   updateSection,
   getSubjectCatalog, getSubjectById
@@ -34,6 +36,11 @@ router.get("/classes", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), listCla
 
 // Grading schemes
 router.get("/grading-schemes", requireAuth, requireRole("SUPER_ADMIN", "ADMIN", "TEACHER"), listGradingSchemes);
+
+// Batches
+router.get("/batches", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), listBatches);
+router.post("/batches", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), createBatch);
+router.put("/batches/:id", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), updateBatch);
 
 // Sections
 router.get("/sections", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), listSections);

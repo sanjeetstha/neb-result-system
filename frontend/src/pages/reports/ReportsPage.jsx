@@ -28,7 +28,7 @@ function Select({ label, value, onChange, options, placeholder }) {
 
 export default function ReportsPage() {
   const [examId, setExamId] = useState("");
-  const [sectionId, setSectionId] = useState("");
+  const [batchId, setBatchId] = useState("");
   const [tab, setTab] = useState("TABULATION"); // TABULATION | MERIT | STATS
   const [limit, setLimit] = useState("10");
 
@@ -50,50 +50,47 @@ export default function ReportsPage() {
     });
   }, [examsQ.data]);
 
-  const sectionsQ = useQuery({
-    queryKey: ["masters", "sections"],
+  const batchesQ = useQuery({
+    queryKey: ["masters", "batches"],
     queryFn: async () => {
-      const res = await api.get("/api/masters/sections");
-      const data = res.data?.sections ?? res.data?.data ?? res.data ?? [];
+      const res = await api.get("/api/masters/batches");
+      const data = res.data?.batches ?? res.data?.data ?? res.data ?? [];
       return Array.isArray(data) ? data : [];
     },
     staleTime: 30_000,
   });
 
-  const sectionOptions = useMemo(() => {
-    const arr = sectionsQ.data || [];
-    return arr.map((s) => {
-      const id = String(s.id ?? s.section_id ?? "");
-      const name = s.name ?? s.section_name ?? "";
-      const campus = s.campus_code || s.campus?.code || "";
-      const faculty = s.faculty_code || s.faculty?.code || "";
-      const year = s.year_bs || s.academic_year?.year_bs || "";
-      const cls = s.class_name || s.class?.name || s.class_id || "";
-      const label = [campus, year, cls, faculty, name].filter(Boolean).join(" • ");
-      return { value: id, label: label || `Section #${id}` };
+  const batchOptions = useMemo(() => {
+    const arr = batchesQ.data || [];
+    return arr.map((b) => {
+      const id = String(b.id ?? b.batch_id ?? "");
+      const name = b.name ?? "";
+      const year = b.year_bs ?? "";
+      const label = [name, year ? `(${year})` : ""].filter(Boolean).join(" ");
+      return { value: id, label: label || `Batch #${id}` };
     });
-  }, [sectionsQ.data]);
+  }, [batchesQ.data]);
 
   const tabulationQ = useQuery({
-    queryKey: ["reports", "tabulation", examId, sectionId],
-    enabled: tab === "TABULATION" && !!examId && !!sectionId,
+    queryKey: ["reports", "tabulation", examId, batchId],
+    enabled: tab === "TABULATION" && !!examId && !!batchId,
     queryFn: async () => {
       const res = await api.get(
         `/api/reports/tabulation?exam_id=${encodeURIComponent(
           examId
-        )}&section_id=${encodeURIComponent(sectionId)}`
+        )}&batch_id=${encodeURIComponent(batchId)}`
       );
       return res.data;
     },
   });
 
   const meritQ = useQuery({
-    queryKey: ["reports", "merit", examId, sectionId, limit],
+    queryKey: ["reports", "merit", examId, batchId, limit],
     enabled: tab === "MERIT" && !!examId,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("exam_id", examId);
-      if (sectionId) params.set("section_id", sectionId);
+      if (batchId) params.set("batch_id", batchId);
       params.set("limit", String(limit || 10));
       const res = await api.get(`/api/reports/merit?${params.toString()}`);
       return res.data;
@@ -101,12 +98,12 @@ export default function ReportsPage() {
   });
 
   const statsQ = useQuery({
-    queryKey: ["reports", "pass-stats", examId, sectionId],
+    queryKey: ["reports", "pass-stats", examId, batchId],
     enabled: tab === "STATS" && !!examId,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("exam_id", examId);
-      if (sectionId) params.set("section_id", sectionId);
+      if (batchId) params.set("batch_id", batchId);
       const res = await api.get(`/api/reports/pass-stats?${params.toString()}`);
       return res.data;
     },
@@ -117,7 +114,7 @@ export default function ReportsPage() {
       <div>
         <h2 className="text-lg font-semibold">Reports</h2>
         <p className="text-sm text-muted-foreground">
-          Published results only. Select exam and section to generate reports.
+          Published results only. Select exam and batch to generate reports.
         </p>
       </div>
 
@@ -133,11 +130,11 @@ export default function ReportsPage() {
             />
 
             <Select
-              label="Section (optional for merit/stats)"
-              value={sectionId}
-              onChange={setSectionId}
-              options={sectionOptions}
-              placeholder={sectionsQ.isLoading ? "Loading sections..." : "Select section"}
+              label="Batch (optional for merit/stats)"
+              value={batchId}
+              onChange={setBatchId}
+              options={batchOptions}
+              placeholder={batchesQ.isLoading ? "Loading batches..." : "Select batch"}
             />
 
             {tab === "MERIT" ? (
@@ -181,9 +178,9 @@ export default function ReportsPage() {
       {tab === "TABULATION" ? (
         <Card>
           <CardContent className="p-4">
-            {!examId || !sectionId ? (
+            {!examId || !batchId ? (
               <div className="text-sm text-muted-foreground">
-                Select exam and section to view tabulation.
+                Select exam and batch to view tabulation.
               </div>
             ) : tabulationQ.isLoading ? (
               <div className="text-sm text-muted-foreground">Loading tabulation...</div>

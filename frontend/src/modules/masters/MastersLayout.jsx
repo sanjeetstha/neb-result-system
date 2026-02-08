@@ -4,7 +4,7 @@ const tabs = [
   { to: "/masters/campuses", label: "Campuses" },
   { to: "/masters/academic-years", label: "Academic Years" },
   { to: "/masters/faculties", label: "Faculties" },
-  { to: "/masters/sections", label: "Sections" },
+  { to: "/masters/batches", label: "Batches" },
 ];
 
 export default function MastersLayout() {
@@ -13,7 +13,7 @@ export default function MastersLayout() {
       <div>
         <h2 className="text-lg font-semibold">Masters</h2>
         <p className="text-sm text-muted-foreground">
-          Configure campuses, academic years, faculties, and sections.
+          Configure campuses, academic years, faculties, and batches.
         </p>
       </div>
 

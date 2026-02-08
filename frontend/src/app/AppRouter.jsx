@@ -98,12 +98,13 @@ import MastersLayout from "../modules/masters/MastersLayout";
 import CampusesPage from "../modules/masters/CampusesPage";
 import AcademicYearsPage from "../modules/masters/AcademicYearsPage";
 import FacultiesPage from "../modules/masters/FacultiesPage";
-import SectionsPage from "../modules/masters/SectionsPage";
+import BatchesPage from "../modules/masters/BatchesPage";
 
 import StudentsPage from "../modules/students/StudentsPage";
 
 import ExamsPage from "../modules/exams/ExamsPage";
 import ExamComponentsPage from "../modules/exams/ExamComponentsPage";
+import ExamWorkflowPage from "../modules/exams/ExamWorkflowPage";
 
 import MarksEntryPage from "../modules/marks/MarksEntryPage";
 import MarksGridPage from "../modules/marks/MarksGridPage";
@@ -143,7 +144,7 @@ export default function AppRouter() {
           <Route path="campuses" element={<CampusesPage />} />
           <Route path="academic-years" element={<AcademicYearsPage />} />
           <Route path="faculties" element={<FacultiesPage />} />
-          <Route path="sections" element={<SectionsPage />} />
+          <Route path="batches" element={<BatchesPage />} />
         </Route>
 
         {/* Students */}
@@ -152,6 +153,7 @@ export default function AppRouter() {
         {/* Exams */}
         <Route path="exams" element={<ExamsPage />} />
         <Route path="exams/:examId/components" element={<ExamComponentsPage />} />
+        <Route path="exams/workflow" element={<ExamWorkflowPage />} />
 
         {/* Marks */}
         <Route path="marks" element={<MarksEntryPage />} />

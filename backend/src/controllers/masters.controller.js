@@ -44,12 +44,17 @@ async function updateCampus(req, res) {
 }
 
 async function listAcademicYears(req, res) {
-  const [rows] = await db.query(`SELECT * FROM academic_years ORDER BY year_bs DESC`);
+  const [rows] = await db.query(
+    `SELECT ay.*, b.name AS batch_name, b.year_bs AS batch_year_bs
+     FROM academic_years ay
+     LEFT JOIN batches b ON b.id=ay.batch_id
+     ORDER BY ay.year_bs DESC`
+  );
   res.json({ ok: true, academic_years: rows });
 }
 
 async function createAcademicYear(req, res) {
-  const { year_bs, year_ad, is_current } = req.body || {};
+  const { year_bs, year_ad, is_current, batch_id } = req.body || {};
   if (!year_bs) return res.status(400).json({ ok: false, message: "year_bs required" });
 
   // If setting current, first unset others
@@ -59,8 +64,8 @@ async function createAcademicYear(req, res) {
 
   try {
     const [r] = await db.query(
-      `INSERT INTO academic_years (year_bs, year_ad, is_current) VALUES (?,?,?)`,
-      [String(year_bs), year_ad || null, is_current ? 1 : 0]
+      `INSERT INTO academic_years (year_bs, year_ad, is_current, batch_id) VALUES (?,?,?,?)`,
+      [String(year_bs), year_ad || null, is_current ? 1 : 0, batch_id || null]
     );
     res.json({ ok: true, id: r.insertId });
   } catch (e) {
@@ -73,7 +78,7 @@ async function createAcademicYear(req, res) {
 
 async function updateAcademicYear(req, res) {
   const id = Number(req.params.id);
-  const { year_bs, year_ad, is_current } = req.body || {};
+  const { year_bs, year_ad, is_current, batch_id } = req.body || {};
   if (!id) return res.status(400).json({ ok: false, message: "Invalid academic year id" });
   if (!year_bs) return res.status(400).json({ ok: false, message: "year_bs required" });
 
@@ -84,8 +89,8 @@ async function updateAcademicYear(req, res) {
 
   try {
     await db.query(
-      `UPDATE academic_years SET year_bs=?, year_ad=?, is_current=? WHERE id=?`,
-      [String(year_bs), year_ad || null, is_current ? 1 : 0, id]
+      `UPDATE academic_years SET year_bs=?, year_ad=?, is_current=?, batch_id=? WHERE id=?`,
+      [String(year_bs), year_ad || null, is_current ? 1 : 0, batch_id || null, id]
     );
     res.json({ ok: true, message: "Academic year updated" });
   } catch (e) {
@@ -152,6 +157,60 @@ async function listGradingSchemes(req, res) {
     res.json({ ok: true, grading_schemes: rows });
   } catch (e) {
     res.status(500).json({ ok: false, message: "Failed to load grading schemes" });
+  }
+}
+
+async function listBatches(req, res) {
+  const [rows] = await db.query(
+    `SELECT id, name, year_bs, is_active
+     FROM batches
+     ORDER BY year_bs DESC, id DESC`
+  );
+  res.json({ ok: true, batches: rows });
+}
+
+async function createBatch(req, res) {
+  const { name, year_bs } = req.body || {};
+  if (!name) {
+    return res.status(400).json({ ok: false, message: "name required" });
+  }
+
+  try {
+    const [r] = await db.query(
+      `INSERT INTO batches (name, year_bs)
+       VALUES (?,?)`,
+      [name, year_bs || null]
+    );
+    res.json({ ok: true, id: r.insertId });
+  } catch (e) {
+    if (String(e.message).toLowerCase().includes("duplicate")) {
+      return res.status(409).json({ ok: false, message: "Batch already exists" });
+    }
+    res.status(500).json({ ok: false, message: "Server error" });
+  }
+}
+
+async function updateBatch(req, res) {
+  const id = Number(req.params.id);
+  const { name, year_bs, is_active } = req.body || {};
+  if (!id) return res.status(400).json({ ok: false, message: "Invalid batch id" });
+  if (!name) {
+    return res.status(400).json({ ok: false, message: "name required" });
+  }
+
+  try {
+    await db.query(
+      `UPDATE batches
+       SET name=?, year_bs=?, is_active=?
+       WHERE id=?`,
+      [name, year_bs || null, is_active ? 1 : 0, id]
+    );
+    res.json({ ok: true, message: "Batch updated" });
+  } catch (e) {
+    if (String(e.message).toLowerCase().includes("duplicate")) {
+      return res.status(409).json({ ok: false, message: "Batch already exists" });
+    }
+    res.status(500).json({ ok: false, message: "Server error" });
   }
 }
 
@@ -311,6 +370,9 @@ module.exports = {
   updateFaculty,
   listClasses,
   listGradingSchemes,
+  listBatches,
+  createBatch,
+  updateBatch,
   listSections,
   createSection,
   updateSection,

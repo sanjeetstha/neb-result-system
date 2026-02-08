@@ -160,6 +160,17 @@ async function importMarks(req, res) {
     });
   }
 
+  // batch + faculty defaults for auto-enrollment
+  const [[ayRow]] = await db.query(
+    `SELECT batch_id FROM academic_years WHERE id=? LIMIT 1`,
+    [exam.academic_year_id]
+  );
+  let defaultFacultyId = exam.faculty_id || null;
+  if (!defaultFacultyId) {
+    const [[f]] = await db.query(`SELECT id FROM faculties ORDER BY id ASC LIMIT 1`);
+    defaultFacultyId = f?.id || null;
+  }
+
   // 4) Read Excel from buffer
   let wb;
   try {
@@ -333,6 +344,64 @@ async function importMarks(req, res) {
 
       totalRows = Math.max(0, rows.length - (headerRowIdx + 2));
 
+      const ensureEnrollment = async ({ symbol_no, nameVal, regdVal, dobVal }) => {
+        let existing = enrollmentBySymbol.get(symbol_no);
+        if (existing) return existing;
+
+        // try find student by symbol_no
+        const [[student]] = await conn.query(
+          `SELECT id FROM students WHERE symbol_no=? LIMIT 1`,
+          [symbol_no]
+        );
+        let studentId = student?.id || null;
+        if (!studentId) {
+          const [ins] = await conn.query(
+            `INSERT INTO students (full_name, dob, symbol_no, regd_no)
+             VALUES (?,?,?,?)`,
+            [nameVal || symbol_no, dobVal || null, symbol_no, regdVal || null]
+          );
+          studentId = ins.insertId;
+        } else if (nameVal || regdVal || dobVal) {
+          await conn.query(
+            `UPDATE students
+             SET full_name=COALESCE(NULLIF(?,''), full_name),
+                 regd_no=COALESCE(NULLIF(?,''), regd_no),
+                 dob=COALESCE(?, dob)
+             WHERE id=?`,
+            [nameVal, regdVal, dobVal, studentId]
+          );
+        }
+
+        // ensure enrollment
+        const [[enr]] = await conn.query(
+          `SELECT id FROM student_enrollments
+           WHERE student_id=? AND academic_year_id=? AND class_id=?
+           LIMIT 1`,
+          [studentId, exam.academic_year_id, exam.class_id]
+        );
+        let enrollmentId = enr?.id || null;
+        if (!enrollmentId) {
+          const [insE] = await conn.query(
+            `INSERT INTO student_enrollments
+               (student_id, campus_id, academic_year_id, class_id, faculty_id, batch_id)
+             VALUES (?,?,?,?,?,?)`,
+            [
+              studentId,
+              exam.campus_id,
+              exam.academic_year_id,
+              exam.class_id,
+              defaultFacultyId,
+              ayRow?.batch_id || null,
+            ]
+          );
+          enrollmentId = insE.insertId;
+        }
+
+        const payload = { enrollment_id: enrollmentId, student_id: studentId };
+        enrollmentBySymbol.set(symbol_no, payload);
+        return payload;
+      };
+
       for (let r = headerRowIdx + 2; r < rows.length; r++) {
         const row = rows[r] || [];
         const rowNo = r + 1;
@@ -350,19 +419,20 @@ async function importMarks(req, res) {
           continue;
         }
 
-        const enrollment = enrollmentBySymbol.get(symbol_no);
-        if (!enrollment) {
-          skipped++;
-          errors.push({
-            row: rowNo,
-            reason: `No enrollment found for symbol_no ${symbol_no} in this exam context`,
-          });
-          continue;
-        }
         let dobVal = null;
         if (dobIdx >= 0) {
           const adIdx = sub[dobIdx + 1] && sub[dobIdx + 1].includes("ad") ? dobIdx + 1 : dobIdx;
           dobVal = excelDateToISO(row[adIdx]);
+        }
+
+        let enrollment = enrollmentBySymbol.get(symbol_no);
+        if (!enrollment) {
+          enrollment = await ensureEnrollment({
+            symbol_no,
+            nameVal,
+            regdVal,
+            dobVal,
+          });
         }
 
         if (nameVal || regdVal || dobVal) {

@@ -49,76 +49,84 @@ async function getStudentMarkLedger(req, res) {
   const examId = Number(req.params.examId);
   const enrollmentId = Number(req.params.enrollmentId);
 
-  // fetch all components relevant to student (compulsory + optionals)
-  const [profileRows] = await db.query(
-    `SELECT e.academic_year_id, e.class_id
-     FROM student_enrollments e WHERE e.id=? LIMIT 1`,
-    [enrollmentId]
-  );
-  if (profileRows.length === 0) return res.status(404).json({ ok: false, message: "Enrollment not found" });
+  try {
+    // fetch all components relevant to student (compulsory + optionals)
+    const [profileRows] = await db.query(
+      `SELECT e.academic_year_id, e.class_id
+       FROM student_enrollments e WHERE e.id=? LIMIT 1`,
+      [enrollmentId]
+    );
+    if (profileRows.length === 0) return res.status(404).json({ ok: false, message: "Enrollment not found" });
 
-  // get compulsory subjects
-  const [[cg]] = await db.query(
-    `SELECT id FROM catalog_groups
-     WHERE academic_year_id <=> ? AND class_id <=> ? AND faculty_id IS NULL AND name='COMPULSORY'
-     LIMIT 1`,
-    [profileRows[0].academic_year_id, profileRows[0].class_id]
-  );
+    // get compulsory subjects
+    const [[cg]] = await db.query(
+      `SELECT id FROM catalog_groups
+       WHERE academic_year_id <=> ? AND class_id <=> ? AND faculty_id IS NULL AND name='COMPULSORY'
+       LIMIT 1`,
+      [profileRows[0].academic_year_id, profileRows[0].class_id]
+    );
 
-  let subjectIds = [];
-  if (cg) {
-    const [cs] = await db.query(`SELECT subject_id FROM catalog_group_subjects WHERE catalog_group_id=?`, [cg.id]);
-    subjectIds.push(...cs.map(x => x.subject_id));
+    let subjectIds = [];
+    if (cg) {
+      const [cs] = await db.query(`SELECT subject_id FROM catalog_group_subjects WHERE catalog_group_id=?`, [cg.id]);
+      subjectIds.push(...cs.map(x => x.subject_id));
+    }
+
+    // optionals
+    const [ops] = await db.query(`SELECT subject_id FROM student_optional_choices WHERE enrollment_id=?`, [enrollmentId]);
+    subjectIds.push(...ops.map(x => x.subject_id));
+    subjectIds = [...new Set(subjectIds)];
+
+    if (subjectIds.length === 0) {
+      return res.json({ ok: true, exam_id: examId, enrollment_id: enrollmentId, ledger: [] });
+    }
+
+    const [components] = await db.query(
+      `SELECT sc.subject_id, s.name AS subject_name, sc.component_type, sc.component_code, sc.component_title, sc.credit_hour
+       FROM subject_components sc
+       JOIN subjects s ON s.id=sc.subject_id
+       WHERE sc.subject_id IN (?)
+       ORDER BY s.name ASC, FIELD(sc.component_type,'TH','PR','IN')`,
+      [subjectIds]
+    );
+
+    const [configs] = await db.query(
+      `SELECT component_code, full_marks, is_enabled
+       FROM exam_component_configs
+       WHERE exam_id=?`,
+      [examId]
+    );
+    const cfgByCode = new Map(configs.map(c => [c.component_code, c]));
+
+    const [saved] = await db.query(
+      `SELECT component_code, marks_obtained, is_absent
+       FROM marks
+       WHERE exam_id=? AND enrollment_id=?`,
+      [examId, enrollmentId]
+    );
+    const markByCode = new Map(saved.map(m => [m.component_code, m]));
+
+    const out = components.map(c => {
+      const cfg = cfgByCode.get(c.component_code) || null;
+      const mk = markByCode.get(c.component_code) || null;
+      return {
+        subject_id: c.subject_id,
+        subject_name: c.subject_name,
+        component_type: c.component_type,
+        component_code: c.component_code,
+        title: c.component_title,
+        credit_hour: c.credit_hour,
+        full_marks: cfg ? Number(cfg.full_marks) : null,
+        enabled_in_exam: cfg ? !!cfg.is_enabled : false,
+        marks_obtained: mk ? mk.marks_obtained : null,
+        is_absent: mk ? !!mk.is_absent : false
+      };
+    });
+
+    res.json({ ok: true, exam_id: examId, enrollment_id: enrollmentId, ledger: out });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e?.message || "Failed to load ledger" });
   }
-
-  // optionals
-  const [ops] = await db.query(`SELECT subject_id FROM student_optional_choices WHERE enrollment_id=?`, [enrollmentId]);
-  subjectIds.push(...ops.map(x => x.subject_id));
-  subjectIds = [...new Set(subjectIds)];
-
-  const [components] = await db.query(
-    `SELECT sc.subject_id, s.name AS subject_name, sc.component_type, sc.component_code, sc.component_title, sc.credit_hour
-     FROM subject_components sc
-     JOIN subjects s ON s.id=sc.subject_id
-     WHERE sc.subject_id IN (?)
-     ORDER BY s.name ASC, FIELD(sc.component_type,'TH','PR','IN')`,
-    [subjectIds]
-  );
-
-  const [configs] = await db.query(
-    `SELECT component_code, full_marks, is_enabled
-     FROM exam_component_configs
-     WHERE exam_id=?`,
-    [examId]
-  );
-  const cfgByCode = new Map(configs.map(c => [c.component_code, c]));
-
-  const [saved] = await db.query(
-    `SELECT component_code, marks_obtained, is_absent
-     FROM marks
-     WHERE exam_id=? AND enrollment_id=?`,
-    [examId, enrollmentId]
-  );
-  const markByCode = new Map(saved.map(m => [m.component_code, m]));
-
-  const out = components.map(c => {
-    const cfg = cfgByCode.get(c.component_code) || null;
-    const mk = markByCode.get(c.component_code) || null;
-    return {
-      subject_id: c.subject_id,
-      subject_name: c.subject_name,
-      component_type: c.component_type,
-      component_code: c.component_code,
-      title: c.component_title,
-      credit_hour: c.credit_hour,
-      full_marks: cfg ? Number(cfg.full_marks) : null,
-      enabled_in_exam: cfg ? !!cfg.is_enabled : false,
-      marks_obtained: mk ? mk.marks_obtained : null,
-      is_absent: mk ? !!mk.is_absent : false
-    };
-  });
-
-  res.json({ ok: true, exam_id: examId, enrollment_id: enrollmentId, ledger: out });
 }
 
 module.exports = { upsertMarks, getStudentMarkLedger };

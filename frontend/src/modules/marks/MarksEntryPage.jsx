@@ -51,7 +51,7 @@ export default function MarksEntryPage() {
   const qc = useQueryClient();
 
   const [examId, setExamId] = useState("");
-  const [sectionId, setSectionId] = useState("");
+  const [batchId, setBatchId] = useState("");
   const [enrollmentId, setEnrollmentId] = useState("");
 
   // editable marks map: { component_code: value }
@@ -83,37 +83,44 @@ export default function MarksEntryPage() {
     });
   }, [examsQ.data]);
 
+  // helpful exam status (must be defined before studentsQ)
+  const selectedExam = useMemo(() => {
+    return (examsQ.data || []).find((e) => String(e.id ?? e.exam_id) === String(examId)) || null;
+  }, [examsQ.data, examId]);
+
+  const isPublished = !!(selectedExam?.published_at || selectedExam?.is_published);
+
   // ----------------- LOAD SECTIONS -----------------
-  const sectionsQ = useQuery({
-    queryKey: ["masters", "sections"],
+  const batchesQ = useQuery({
+    queryKey: ["masters", "batches"],
     queryFn: async () => {
-      const res = await api.get("/api/masters/sections");
-      const data = res.data?.sections ?? res.data?.data ?? res.data ?? [];
+      const res = await api.get("/api/masters/batches");
+      const data = res.data?.batches ?? res.data?.data ?? res.data ?? [];
       return Array.isArray(data) ? data : [];
     },
     staleTime: 30_000,
   });
 
-  const sectionOptions = useMemo(() => {
-    const arr = sectionsQ.data || [];
-    return arr.map((s) => {
-      const id = String(s.id ?? s.section_id ?? "");
-      const name = s.name ?? s.section_name ?? "";
-      const campus = s.campus_code || s.campus?.code || "";
-      const faculty = s.faculty_code || s.faculty?.code || "";
-      const year = s.year_bs || s.academic_year?.year_bs || "";
-      const cls = s.class_name || s.class?.name || s.class_id || "";
-      const label = [campus, year, cls, faculty, name].filter(Boolean).join(" • ");
-      return { value: id, label: label || `Section #${id}` };
+  const batchOptions = useMemo(() => {
+    const arr = batchesQ.data || [];
+    return arr.map((b) => {
+      const id = String(b.id ?? b.batch_id ?? "");
+      const name = b.name ?? "";
+      const year = b.year_bs ?? "";
+      const label = [name, year ? `(${year})` : ""].filter(Boolean).join(" ");
+      return { value: id, label: label || `Batch #${id}` };
     });
-  }, [sectionsQ.data]);
+  }, [batchesQ.data]);
 
-  // ----------------- LOAD STUDENTS for SECTION -----------------
+  // ----------------- LOAD STUDENTS for BATCH -----------------
   const studentsQ = useQuery({
-    queryKey: ["students", "list", sectionId],
-    enabled: !!sectionId,
+    queryKey: ["students", "list", batchId, selectedExam?.class_id],
+    enabled: !!batchId && !!selectedExam?.class_id,
     queryFn: async () => {
-      const res = await api.get(`/api/students?section_id=${encodeURIComponent(sectionId)}`);
+      const params = new URLSearchParams();
+      params.set("batch_id", batchId);
+      if (selectedExam?.class_id) params.set("class_id", selectedExam.class_id);
+      const res = await api.get(`/api/students?${params.toString()}`);
       const data = res.data?.students ?? res.data?.data ?? res.data ?? [];
       return Array.isArray(data) ? data : [];
     },
@@ -122,19 +129,21 @@ export default function MarksEntryPage() {
 
   const studentOptions = useMemo(() => {
     const arr = studentsQ.data || [];
-    return arr.map((x) => {
-      const eid = String(
-        x.enrollment_id ??
-          x.enrollmentId ??
-          x.id_enrollment ??
-          x.enrollment?.id ??
-          ""
-      );
-      const fullName = x.full_name ?? x.name ?? "Student";
-      const sym = x.symbol_no ?? x.symbol ?? "";
-      const label = sym ? `${fullName} — ${sym}` : fullName;
-      return { value: eid, label };
-    }).filter((x) => x.value);
+    return arr
+      .map((x) => {
+        const eid = String(
+          x.enrollment_id ??
+            x.enrollmentId ??
+            x.id_enrollment ??
+            x.enrollment?.id ??
+            ""
+        );
+        const fullName = x.full_name ?? x.name ?? "Student";
+        const sym = x.symbol_no ?? x.symbol ?? "";
+        const label = sym ? `${fullName} — ${sym}` : fullName;
+        return { value: eid, label };
+      })
+      .filter((x) => x.value);
   }, [studentsQ.data]);
 
   // ----------------- STUDENT PROFILE + OPTIONALS -----------------
@@ -163,11 +172,11 @@ export default function MarksEntryPage() {
     staleTime: 30_000,
   });
 
-  // reset enrollment if section changed
+  // reset enrollment if batch changed
   useEffect(() => {
     setEnrollmentId("");
     setMarks({});
-  }, [sectionId]);
+  }, [batchId]);
 
   // reset marks if exam changed
   useEffect(() => {
@@ -354,13 +363,6 @@ export default function MarksEntryPage() {
 
 
 
-  // helpful exam status
-  const selectedExam = useMemo(() => {
-    return (examsQ.data || []).find((e) => String(e.id ?? e.exam_id) === String(examId)) || null;
-  }, [examsQ.data, examId]);
-
-  const isPublished = !!(selectedExam?.published_at || selectedExam?.is_published);
-
   const optionalGroups = useMemo(() => {
     const raw =
       catalogQ.data?.catalog_groups ||
@@ -414,7 +416,7 @@ export default function MarksEntryPage() {
       <div>
         <h2 className="text-lg font-semibold">Marks Entry</h2>
         <p className="text-sm text-muted-foreground">
-          Student-wise marks entry. Select exam, section, and student enrollment.
+          Student-wise marks entry. Select exam, batch, and student enrollment.
         </p>
       </div>
 
@@ -430,11 +432,11 @@ export default function MarksEntryPage() {
             />
 
             <Select
-              label="Section"
-              value={sectionId}
-              onChange={setSectionId}
-              options={sectionOptions}
-              placeholder={sectionsQ.isLoading ? "Loading sections..." : "Select section"}
+              label="Batch"
+              value={batchId}
+              onChange={setBatchId}
+              options={batchOptions}
+              placeholder={batchesQ.isLoading ? "Loading batches..." : "Select batch"}
             />
 
             <Select
@@ -442,7 +444,7 @@ export default function MarksEntryPage() {
               value={enrollmentId}
               onChange={setEnrollmentId}
               options={studentOptions}
-              placeholder={!sectionId ? "Select section first" : (studentsQ.isLoading ? "Loading students..." : "Select student")}
+              placeholder={!batchId ? "Select batch first" : (studentsQ.isLoading ? "Loading students..." : "Select student")}
             />
           </div>
 
@@ -457,10 +459,10 @@ export default function MarksEntryPage() {
               <Badge variant="outline">Select an exam</Badge>
             )}
 
-            {sectionId ? (
-              <Badge variant="outline">Section #{sectionId}</Badge>
+            {batchId ? (
+              <Badge variant="outline">Batch #{batchId}</Badge>
             ) : (
-              <Badge variant="outline">Select a section</Badge>
+              <Badge variant="outline">Select a batch</Badge>
             )}
 
             {enrollmentId ? (

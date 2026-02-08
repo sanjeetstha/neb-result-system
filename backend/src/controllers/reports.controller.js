@@ -2,10 +2,10 @@ const db = require("../db");
 
 async function tabulation(req, res) {
   const examId = Number(req.query.exam_id);
-  const sectionId = Number(req.query.section_id);
+  const batchId = Number(req.query.batch_id);
 
-  if (!examId || !sectionId) {
-    return res.status(400).json({ ok: false, message: "exam_id and section_id required" });
+  if (!examId || !batchId) {
+    return res.status(400).json({ ok: false, message: "exam_id and batch_id required" });
   }
 
   // Only published snapshots (stable)
@@ -15,9 +15,9 @@ async function tabulation(req, res) {
      FROM result_snapshots rs
      JOIN student_enrollments e ON e.id=rs.enrollment_id
      JOIN students s ON s.id=e.student_id
-     WHERE rs.exam_id=? AND rs.published_at IS NOT NULL AND e.section_id=?
+     WHERE rs.exam_id=? AND rs.published_at IS NOT NULL AND e.batch_id=?
      ORDER BY CAST(s.roll_no AS UNSIGNED), s.full_name ASC`,
-    [examId, sectionId]
+    [examId, batchId]
   );
 
   const table = rows.map(r => {
@@ -37,12 +37,12 @@ async function tabulation(req, res) {
     };
   });
 
-  res.json({ ok: true, exam_id: examId, section_id: sectionId, count: table.length, table });
+  res.json({ ok: true, exam_id: examId, batch_id: batchId, count: table.length, table });
 }
 
 async function meritList(req, res) {
   const examId = Number(req.query.exam_id);
-  const sectionId = req.query.section_id ? Number(req.query.section_id) : null;
+  const batchId = req.query.batch_id ? Number(req.query.batch_id) : null;
   const limit = req.query.limit ? Number(req.query.limit) : 10;
 
   if (!examId) return res.status(400).json({ ok: false, message: "exam_id required" });
@@ -56,9 +56,9 @@ async function meritList(req, res) {
      WHERE rs.exam_id=? AND rs.published_at IS NOT NULL`;
   const params = [examId];
 
-  if (sectionId) {
-    sql += ` AND e.section_id=?`;
-    params.push(sectionId);
+  if (batchId) {
+    sql += ` AND e.batch_id=?`;
+    params.push(batchId);
   }
 
   sql += ` ORDER BY rs.overall_gpa DESC, s.full_name ASC LIMIT ?`;
@@ -66,21 +66,21 @@ async function meritList(req, res) {
 
   const [rows] = await db.query(sql, params);
 
-  res.json({ ok: true, exam_id: examId, section_id: sectionId, limit, merit: rows });
+  res.json({ ok: true, exam_id: examId, batch_id: batchId, limit, merit: rows });
 }
 
 async function passStats(req, res) {
   const examId = Number(req.query.exam_id);
-  const sectionId = req.query.section_id ? Number(req.query.section_id) : null;
+  const batchId = req.query.batch_id ? Number(req.query.batch_id) : null;
 
   if (!examId) return res.status(400).json({ ok: false, message: "exam_id required" });
 
   let where = `WHERE rs.exam_id=? AND rs.published_at IS NOT NULL`;
   const params = [examId];
 
-  if (sectionId) {
-    where += ` AND e.section_id=?`;
-    params.push(sectionId);
+  if (batchId) {
+    where += ` AND e.batch_id=?`;
+    params.push(batchId);
   }
 
   const [[stats]] = await db.query(
@@ -99,7 +99,7 @@ async function passStats(req, res) {
   const failed = Number(stats.failed || 0);
   const pass_percent = total > 0 ? Math.round((passed / total) * 10000) / 100 : 0;
 
-  res.json({ ok: true, exam_id: examId, section_id: sectionId, total, passed, failed, pass_percent });
+  res.json({ ok: true, exam_id: examId, batch_id: batchId, total, passed, failed, pass_percent });
 }
 
 module.exports = { tabulation, meritList, passStats };

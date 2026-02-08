@@ -28,7 +28,7 @@ function parseTargets(text) {
 
 export default function BulkSmsPage() {
   const [examId, setExamId] = useState("");
-  const [sectionId, setSectionId] = useState("");
+  const [batchId, setBatchId] = useState("");
   const [template, setTemplate] = useState(
     "Dear {name}, {exam} result: GPA {gpa}, Grade {grade}, Status {result}."
   );
@@ -45,11 +45,11 @@ export default function BulkSmsPage() {
     staleTime: 10_000,
   });
 
-  const sectionsQ = useQuery({
-    queryKey: ["masters", "sections"],
+  const batchesQ = useQuery({
+    queryKey: ["masters", "batches"],
     queryFn: async () => {
-      const res = await api.get("/api/masters/sections");
-      const data = res.data?.sections ?? res.data?.data ?? res.data ?? [];
+      const res = await api.get("/api/masters/batches");
+      const data = res.data?.batches ?? res.data?.data ?? res.data ?? [];
       return Array.isArray(data) ? data : [];
     },
     staleTime: 30_000,
@@ -62,12 +62,12 @@ export default function BulkSmsPage() {
     }));
   }, [examsQ.data]);
 
-  const sectionOptions = useMemo(() => {
-    return (sectionsQ.data || []).map((s) => ({
-      value: String(s.id ?? s.section_id ?? ""),
-      label: s.name ? `Section ${s.name}` : `Section #${s.id ?? s.section_id}`,
+  const batchOptions = useMemo(() => {
+    return (batchesQ.data || []).map((b) => ({
+      value: String(b.id ?? b.batch_id ?? ""),
+      label: b.name ? `Batch ${b.name}` : `Batch #${b.id ?? b.batch_id}`,
     }));
-  }, [sectionsQ.data]);
+  }, [batchesQ.data]);
 
   const bulkMutation = useMutation({
     mutationFn: async ({ previewOnly }) => {
@@ -76,7 +76,7 @@ export default function BulkSmsPage() {
 
       const payload = {
         exam_id: Number(examId),
-        section_id: sectionId ? Number(sectionId) : null,
+        batch_id: batchId ? Number(batchId) : null,
         template,
         targets,
         preview_only: !!previewOnly,
@@ -126,14 +126,14 @@ export default function BulkSmsPage() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">Section (optional)</label>
+              <label className="text-sm font-medium">Batch (optional)</label>
               <select
                 className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                value={sectionId}
-                onChange={(e) => setSectionId(e.target.value)}
+                value={batchId}
+                onChange={(e) => setBatchId(e.target.value)}
               >
-                <option value="">All sections</option>
-                {sectionOptions.map((o) => (
+                <option value="">All batches</option>
+                {batchOptions.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
                   </option>

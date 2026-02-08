@@ -35,7 +35,8 @@ function normalizePayload(form) {
   const y = toIntOrNull(form.year_bs);
   if (!y) return { error: "Enter a valid BS year (e.g., 2082)." };
   if (y < 2000 || y > 2200) return { error: "Year out of range" };
-  return { payload: { year_bs: y, is_current: !!form.is_current } };
+  const batch_id = form.batch_id ? Number(form.batch_id) : null;
+  return { payload: { year_bs: y, is_current: !!form.is_current, batch_id } };
 }
 
 export default function AcademicYearsPage() {
@@ -44,7 +45,17 @@ export default function AcademicYearsPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
 
-  const [form, setForm] = useState({ year_bs: "", is_current: false });
+  const [form, setForm] = useState({ year_bs: "", is_current: false, batch_id: "" });
+
+  const batchesQ = useQuery({
+    queryKey: ["masters", "batches"],
+    queryFn: async () => {
+      const res = await api.get("/api/masters/batches");
+      const data = res.data?.batches ?? res.data?.data ?? res.data ?? [];
+      return Array.isArray(data) ? data : [];
+    },
+    staleTime: 60_000,
+  });
 
   const q = useQuery({
     queryKey: ["masters", "academic-years"],
@@ -65,7 +76,7 @@ export default function AcademicYearsPage() {
     },
     onSuccess: async () => {
       toast.success("Academic year created");
-      setForm({ year_bs: "", is_current: false });
+      setForm({ year_bs: "", is_current: false, batch_id: "" });
       setOpen(false);
       await qc.invalidateQueries({ queryKey: ["masters", "academic-years"] });
     },
@@ -85,7 +96,7 @@ export default function AcademicYearsPage() {
       toast.success("Academic year updated");
       setEditOpen(false);
       setEditingId(null);
-      setForm({ year_bs: "", is_current: false });
+      setForm({ year_bs: "", is_current: false, batch_id: "" });
       await qc.invalidateQueries({ queryKey: ["masters", "academic-years"] });
     },
     onError: (err) => {
@@ -99,6 +110,8 @@ export default function AcademicYearsPage() {
       .map((x) => ({
         id: x.id ?? x.academic_year_id ?? "",
         year_bs: x.year_bs ?? x.year ?? x.bs_year ?? "",
+        batch_name: x.batch_name ?? "",
+        batch_id: x.batch_id ?? "",
         is_current: Number(x.is_current ?? 0) === 1,
         is_active: Number(x.is_active ?? 1) === 1,
         created_at: x.created_at ?? null,
@@ -111,7 +124,7 @@ export default function AcademicYearsPage() {
 
   const openEdit = (r) => {
     setEditingId(r.id);
-    setForm({ year_bs: String(r.year_bs || ""), is_current: !!r.is_current });
+    setForm({ year_bs: String(r.year_bs || ""), is_current: !!r.is_current, batch_id: r.batch_id || "" });
     setEditOpen(true);
   };
 
@@ -127,6 +140,21 @@ export default function AcademicYearsPage() {
         <p className="text-xs text-muted-foreground">
           Tip: Use the Nepali BS year (not AD).
         </p>
+      </div>
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Batch (optional)</label>
+        <select
+          className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+          value={form.batch_id}
+          onChange={(e) => setForm((p) => ({ ...p, batch_id: e.target.value }))}
+        >
+          <option value="">Select batch</option>
+          {(batchesQ.data || []).map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name} {b.year_bs ? `(${b.year_bs})` : ""}
+            </option>
+          ))}
+        </select>
       </div>
       <label className="text-sm flex items-center gap-2">
         <input
@@ -192,6 +220,7 @@ export default function AcademicYearsPage() {
                 <TableRow>
                   <TableHead className="w-[90px]">ID</TableHead>
                   <TableHead>Year (BS)</TableHead>
+                  <TableHead>Batch</TableHead>
                   <TableHead className="w-[140px]">Status</TableHead>
                   <TableHead className="w-[120px]">Actions</TableHead>
                 </TableRow>
@@ -200,7 +229,7 @@ export default function AcademicYearsPage() {
               <TableBody>
                 {pager.pageItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
                       {q.isLoading ? "Loading..." : "No academic years found."}
                     </TableCell>
                   </TableRow>
@@ -211,6 +240,7 @@ export default function AcademicYearsPage() {
                       <TableCell className="font-medium">
                         {r.year_bs} {r.is_current ? <Badge className="ml-2" variant="secondary">Current</Badge> : null}
                       </TableCell>
+                      <TableCell>{r.batch_name || "—"}</TableCell>
                       <TableCell>
                         {r.is_active ? (
                           <Badge variant="secondary">Active</Badge>

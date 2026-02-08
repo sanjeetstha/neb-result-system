@@ -55,9 +55,71 @@ function pad4(code) {
   return s.padStart(4, "0");
 }
 
+function splitBsDate(v) {
+  const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return { y: "", m: "", d: "" };
+  return { y: m[1], m: m[2], d: m[3] };
+}
+
+function buildBsDate(y, m, d) {
+  if (!y || !m || !d) return "";
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+function BsDateSelect({ value, onChange }) {
+  const parts = splitBsDate(value);
+  const years = [];
+  for (let y = 2000; y <= 2200; y += 1) years.push(String(y));
+  const months = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"));
+  const days = Array.from({ length: 32 }, (_, i) => String(i + 1).padStart(2, "0"));
+
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      <select
+        className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+        value={parts.y}
+        onChange={(e) => onChange(buildBsDate(e.target.value, parts.m, parts.d))}
+      >
+        <option value="">Year</option>
+        {years.map((y) => (
+          <option key={y} value={y}>
+            {y}
+          </option>
+        ))}
+      </select>
+      <select
+        className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+        value={parts.m}
+        onChange={(e) => onChange(buildBsDate(parts.y, e.target.value, parts.d))}
+      >
+        <option value="">Month</option>
+        {months.map((m) => (
+          <option key={m} value={m}>
+            {m}
+          </option>
+        ))}
+      </select>
+      <select
+        className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+        value={parts.d}
+        onChange={(e) => onChange(buildBsDate(parts.y, parts.m, e.target.value))}
+      >
+        <option value="">Day</option>
+        {days.map((d) => (
+          <option key={d} value={d}>
+            {d}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 function normalizeStudentPayload(form) {
-  const section_id = Number(form.section_id || 0);
-  if (!section_id) return { error: "Section is required" };
+  const batch_id = Number(form.batch_id || 0);
+  const class_id = Number(form.class_id || 0);
+  if (!batch_id) return { error: "Batch is required" };
+  if (!class_id) return { error: "Class is required" };
 
   const full_name = norm(form.full_name);
   const symbol_no = norm(form.symbol_no);
@@ -65,14 +127,15 @@ function normalizeStudentPayload(form) {
 
   if (!full_name) return { error: "Student full name is required" };
   if (!symbol_no) return { error: "Symbol no is required" };
-  if (!dob) return { error: "DOB is required (YYYY-MM-DD)" };
+  if (!dob) return { error: "DOB is required (BS, YYYY-MM-DD)" };
 
   const email = norm(form.email) || undefined;
   const phone = norm(form.phone) || undefined;
 
   return {
     payload: {
-      section_id,
+      batch_id,
+      class_id,
       full_name,
       symbol_no,
       dob,
@@ -85,7 +148,8 @@ function normalizeStudentPayload(form) {
 export default function StudentsPage() {
   const qc = useQueryClient();
 
-  const [sectionId, setSectionId] = useState("");
+  const [batchId, setBatchId] = useState("");
+  const [classId, setClassId] = useState("");
   const [open, setOpen] = useState(false);
 
   // Profile dialog state
@@ -105,7 +169,8 @@ export default function StudentsPage() {
 
   // create form
   const [form, setForm] = useState({
-    section_id: "",
+    batch_id: "",
+    class_id: "",
     full_name: "",
     symbol_no: "",
     dob: "",
@@ -117,37 +182,55 @@ export default function StudentsPage() {
   const [optDraft, setOptDraft] = useState({});
   const [optDirty, setOptDirty] = useState(false);
 
-  // load sections
-  const sectionsQ = useQuery({
-    queryKey: ["masters", "sections"],
+  // load batches
+  const batchesQ = useQuery({
+    queryKey: ["masters", "batches"],
     queryFn: async () => {
-      const res = await api.get("/api/masters/sections");
-      const data = res.data?.sections ?? res.data?.data ?? res.data ?? [];
+      const res = await api.get("/api/masters/batches");
+      const data = res.data?.batches ?? res.data?.data ?? res.data ?? [];
       return Array.isArray(data) ? data : [];
     },
     staleTime: 30_000,
   });
 
-  const sectionOptions = useMemo(() => {
-    const arr = sectionsQ.data || [];
-    return arr.map((s) => {
-      const id = String(s.id ?? s.section_id ?? "");
-      const name = s.name ?? s.section_name ?? "";
-      const campus = s.campus_code || s.campus?.code || "";
-      const faculty = s.faculty_code || s.faculty?.code || "";
-      const year = s.year_bs || s.academic_year?.year_bs || "";
-      const cls = s.class_name || s.class?.name || s.class_id || "";
-      const label = [campus, year, cls, faculty, name].filter(Boolean).join(" • ");
-      return { value: id, label: label || `Section #${id}` };
+  const batchOptions = useMemo(() => {
+    const arr = batchesQ.data || [];
+    return arr.map((b) => {
+      const id = String(b.id ?? b.batch_id ?? "");
+      const name = b.name ?? "";
+      const year = b.year_bs ?? "";
+      const label = [name, year ? `(${year})` : ""].filter(Boolean).join(" ");
+      return { value: id, label: label || `Batch #${id}` };
     });
-  }, [sectionsQ.data]);
+  }, [batchesQ.data]);
 
-  // load students for selected section
-  const studentsQ = useQuery({
-    queryKey: ["students", "list", sectionId],
-    enabled: !!sectionId,
+  const classesQ = useQuery({
+    queryKey: ["masters", "classes"],
     queryFn: async () => {
-      const res = await api.get(`/api/students?section_id=${encodeURIComponent(sectionId)}`);
+      const res = await api.get("/api/masters/classes");
+      const data = res.data?.classes ?? res.data?.data ?? res.data ?? [];
+      return Array.isArray(data) ? data : [];
+    },
+    staleTime: 30_000,
+  });
+
+  const classOptions = useMemo(() => {
+    const arr = classesQ.data || [];
+    return arr.map((c) => ({
+      value: String(c.id ?? c.class_id ?? ""),
+      label: c.name ?? `Class #${c.id ?? c.class_id}`,
+    }));
+  }, [classesQ.data]);
+
+  // load students for selected batch + class
+  const studentsQ = useQuery({
+    queryKey: ["students", "list", batchId, classId],
+    enabled: !!batchId && !!classId,
+    queryFn: async () => {
+      const qs = new URLSearchParams();
+      if (batchId) qs.set("batch_id", batchId);
+      if (classId) qs.set("class_id", classId);
+      const res = await api.get(`/api/students?${qs.toString()}`);
       const data = res.data?.students ?? res.data?.data ?? res.data ?? [];
       return Array.isArray(data) ? data : [];
     },
@@ -193,7 +276,7 @@ export default function StudentsPage() {
       toast.success("Student created");
       setOpen(false);
       setForm({
-        section_id: sectionId || "",
+        batch_id: batchId || "",
         full_name: "",
         symbol_no: "",
         dob: "",
@@ -201,7 +284,7 @@ export default function StudentsPage() {
         phone: "",
       });
 
-      await qc.invalidateQueries({ queryKey: ["students", "list", sectionId] });
+      await qc.invalidateQueries({ queryKey: ["students", "list", batchId, classId] });
     },
     onError: (err) => {
       toast.error(err?.response?.data?.message || err.message || "Failed to create student");
@@ -227,7 +310,7 @@ export default function StudentsPage() {
       toast.success("Student updated");
       setEditOpen(false);
       setEditingStudentId(null);
-      await qc.invalidateQueries({ queryKey: ["students", "list", sectionId] });
+      await qc.invalidateQueries({ queryKey: ["students", "list", batchId, classId] });
     },
     onError: (err) => {
       toast.error(err?.response?.data?.message || err.message || "Failed to update student");
@@ -358,35 +441,45 @@ export default function StudentsPage() {
       <div>
         <h2 className="text-lg font-semibold">Students</h2>
         <p className="text-sm text-muted-foreground">
-          Select a section to list students, then add new students into that section.
+          Select a batch and class to list students, then add new students into that batch.
         </p>
       </div>
 
       <div className="rounded-lg border p-3">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <Select
-            label="Section"
-            value={sectionId}
+            label="Batch"
+            value={batchId}
             onChange={(v) => {
-              setSectionId(v);
-              setForm((p) => ({ ...p, section_id: v }));
+              setBatchId(v);
+              setForm((p) => ({ ...p, batch_id: v }));
             }}
-            options={sectionOptions}
-            placeholder={sectionsQ.isLoading ? "Loading sections..." : "Select section"}
+            options={batchOptions}
+            placeholder={batchesQ.isLoading ? "Loading batches..." : "Select batch"}
+          />
+          <Select
+            label="Class"
+            value={classId}
+            onChange={(v) => {
+              setClassId(v);
+              setForm((p) => ({ ...p, class_id: v }));
+            }}
+            options={classOptions}
+            placeholder={classesQ.isLoading ? "Loading classes..." : "Select class"}
           />
 
-          <div className="md:col-span-2 flex items-end justify-between gap-2">
+          <div className="md:col-span-1 flex items-end justify-between gap-2">
             <div className="text-xs text-muted-foreground">
-              {sectionId
+              {batchId && classId
                 ? studentsQ.isLoading
                   ? "Loading students..."
                   : `Total: ${rows.length}`
-                : "Choose a section to load students."}
+                : "Choose a batch and class to load students."}
             </div>
 
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>
-                <Button disabled={!sectionId}>Add Student</Button>
+                <Button disabled={!batchId || !classId}>Add Student</Button>
               </DialogTrigger>
 
               <DialogContent>
@@ -415,12 +508,14 @@ export default function StudentsPage() {
                     </div>
 
                     <div className="space-y-2">
-                      <label className="text-sm font-medium">DOB (YYYY-MM-DD)</label>
-                      <Input
-                        placeholder="2007-01-15"
+                      <label className="text-sm font-medium">DOB (BS)</label>
+                      <BsDateSelect
                         value={form.dob}
-                        onChange={(e) => setForm((p) => ({ ...p, dob: e.target.value }))}
+                        onChange={(v) => setForm((p) => ({ ...p, dob: v }))}
                       />
+                      <div className="text-xs text-muted-foreground">
+                        Format: YYYY-MM-DD (BS)
+                      </div>
                     </div>
 
                     <div className="space-y-2">
@@ -461,13 +556,13 @@ export default function StudentsPage() {
         <div className="flex items-center justify-between p-3 border-b">
           <div className="text-sm font-medium">Student List</div>
           <div className="text-xs text-muted-foreground">
-            {sectionId ? `Section ID: ${sectionId}` : "No section selected"}
+            {batchId ? `Batch ID: ${batchId}` : "No batch selected"}
           </div>
         </div>
 
         <div className="p-3">
-          {!sectionId ? (
-            <div className="text-sm text-muted-foreground">Select a section to view students.</div>
+          {!batchId || !classId ? (
+            <div className="text-sm text-muted-foreground">Select a batch and class to view students.</div>
           ) : studentsQ.isError ? (
             <div className="text-sm text-destructive">
               Failed to load students:{" "}
@@ -562,14 +657,13 @@ export default function StudentsPage() {
                   onChange={(e) => setEditForm((p) => ({ ...p, symbol_no: e.target.value }))}
                 />
               </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">DOB</label>
-                <Input
-                  type="date"
-                  value={editForm.dob}
-                  onChange={(e) => setEditForm((p) => ({ ...p, dob: e.target.value }))}
-                />
-              </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">DOB (BS)</label>
+                      <BsDateSelect
+                        value={editForm.dob}
+                        onChange={(v) => setEditForm((p) => ({ ...p, dob: v }))}
+                      />
+                    </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Regd No</label>
                 <Input

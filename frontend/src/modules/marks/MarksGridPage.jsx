@@ -31,6 +31,13 @@ function safeNum(v) {
   return Number.isFinite(n) ? n : "";
 }
 
+function formatGpa(v) {
+  if (v == null || v === "") return "—";
+  const n = Number(v);
+  if (!Number.isFinite(n)) return String(v);
+  return n.toFixed(2);
+}
+
 function Select({ label, value, onChange, options, placeholder }) {
   return (
     <div className="space-y-2">
@@ -64,12 +71,15 @@ function PreviewKV({ label, value }) {
 
 export default function MarksGridPage() {
   const [examId, setExamId] = useState("");
-  const [sectionId, setSectionId] = useState("");
+  const [batchId, setBatchId] = useState("");
   const [viewMode, setViewMode] = useState("ledger");
 
   const [marksByEnrollment, setMarksByEnrollment] = useState({});
   const [ledgerByEnrollment, setLedgerByEnrollment] = useState({});
   const [loadingLedgers, setLoadingLedgers] = useState(false);
+  const [gradesByEnrollment, setGradesByEnrollment] = useState({});
+  const [loadingGrades, setLoadingGrades] = useState(false);
+  const [gradeProgress, setGradeProgress] = useState({ done: 0, total: 0 });
   const [optionalByEnrollment, setOptionalByEnrollment] = useState({});
   const [studentEdits, setStudentEdits] = useState({});
   const studentBaselineRef = useRef({});
@@ -93,12 +103,11 @@ export default function MarksGridPage() {
 
   // ✅ Sticky sizes (Actions smaller)
   const STICKY = {
+    SN_W: 60,
     SYMBOL_W: 140,
-    REGD_W: 150,
-    DOB_W: 140,
-    STUDENT_W: 240,
+    STUDENT_W: 260,
     ACTION_W: 220,
-    TOTAL_W: 140,
+    TOTAL_W: 120,
   };
 
   // ✅ Preview dialog state
@@ -226,39 +235,37 @@ export default function MarksGridPage() {
     return map;
   }, [optionalGroups]);
 
-  // ---------------- SECTIONS ----------------
-  const sectionsQ = useQuery({
-    queryKey: ["masters", "sections"],
+  // ---------------- BATCHES ----------------
+  const batchesQ = useQuery({
+    queryKey: ["masters", "batches"],
     queryFn: async () => {
-      const res = await api.get("/api/masters/sections");
-      const data = res.data?.sections ?? res.data?.data ?? res.data ?? [];
+      const res = await api.get("/api/masters/batches");
+      const data = res.data?.batches ?? res.data?.data ?? res.data ?? [];
       return Array.isArray(data) ? data : [];
     },
     staleTime: 30_000,
   });
 
-  const sectionOptions = useMemo(() => {
-    const arr = sectionsQ.data || [];
-    return arr.map((s) => {
-      const id = String(s.id ?? s.section_id ?? "");
-      const name = s.name ?? s.section_name ?? "";
-      const campus = s.campus_code || s.campus?.code || "";
-      const faculty = s.faculty_code || s.faculty?.code || "";
-      const year = s.year_bs || s.academic_year?.year_bs || "";
-      const cls = s.class_name || s.class?.name || s.class_id || "";
-      const label = [campus, year, cls, faculty, name].filter(Boolean).join(" • ");
-      return { value: id, label: label || `Section #${id}` };
+  const batchOptions = useMemo(() => {
+    const arr = batchesQ.data || [];
+    return arr.map((b) => {
+      const id = String(b.id ?? b.batch_id ?? "");
+      const name = b.name ?? "";
+      const year = b.year_bs ?? "";
+      const label = [name, year ? `(${year})` : ""].filter(Boolean).join(" ");
+      return { value: id, label: label || `Batch #${id}` };
     });
-  }, [sectionsQ.data]);
+  }, [batchesQ.data]);
 
-  // ---------------- STUDENTS BY SECTION ----------------
+  // ---------------- STUDENTS BY BATCH ----------------
   const studentsQ = useQuery({
-    queryKey: ["students", "list", sectionId],
-    enabled: !!sectionId,
+    queryKey: ["students", "list", batchId, selectedExam?.class_id],
+    enabled: !!batchId && !!selectedExam?.class_id,
     queryFn: async () => {
-      const res = await api.get(
-        `/api/students?section_id=${encodeURIComponent(sectionId)}`
-      );
+      const params = new URLSearchParams();
+      params.set("batch_id", batchId);
+      if (selectedExam?.class_id) params.set("class_id", selectedExam.class_id);
+      const res = await api.get(`/api/students?${params.toString()}`);
       return res.data?.students ?? [];
     },
     staleTime: 5_000,
@@ -281,6 +288,7 @@ export default function MarksGridPage() {
         full_name: s.full_name || "",
         symbol_no: s.symbol_no || "",
         regd_no: s.regd_no || "",
+        roll_no: s.roll_no || "",
         dob: s.dob ? String(s.dob).slice(0, 10) : "",
       };
     }
@@ -292,6 +300,9 @@ export default function MarksGridPage() {
   useEffect(() => {
     setLedgerByEnrollment({});
     setMarksByEnrollment({});
+    setGradesByEnrollment({});
+    setLoadingGrades(false);
+    setGradeProgress({ done: 0, total: 0 });
     setOptionalByEnrollment({});
     setStudentEdits({});
     setPreviewOpen(false);
@@ -304,34 +315,50 @@ export default function MarksGridPage() {
     setImportSummary(null);
     baselineRef.current = {};
     studentBaselineRef.current = {};
-  }, [examId, sectionId]);
+  }, [examId, batchId]);
 
   // ---------------- LOAD LEDGERS FOR ALL STUDENTS ----------------
-  const canLoad = !!examId && !!sectionId && students.length > 0;
+  const canLoad = !!examId && !!batchId && students.length > 0;
 
   const loadLedgers = async () => {
     if (!canLoad) return;
+    if (compulsoryCols.length === 0 && optionalGroups.length === 0) {
+      toast.error("No subject catalog configured for this class. Configure subjects first.");
+      return;
+    }
 
     try {
       setLoadingLedgers(true);
 
       const ledgers = {};
       const marksInit = {};
+      const errors = [];
 
       for (const s of students) {
         const enrollment_id = s.enrollment_id;
-        const res = await api.get(`/api/marks/${examId}/enrollments/${enrollment_id}`);
-        const ledger = res.data?.ledger ?? [];
-        ledgers[enrollment_id] = ledger;
+        try {
+          const res = await api.get(`/api/marks/${examId}/enrollments/${enrollment_id}`);
+          const ledger = res.data?.ledger ?? [];
+          ledgers[enrollment_id] = ledger;
 
-        const rowMarks = {};
-        for (const item of ledger) {
-          if (!item?.enabled_in_exam) continue;
-          const code = String(item.component_code ?? "").trim();
-          if (!code) continue;
-          rowMarks[code] = item.marks_obtained == null ? "" : String(item.marks_obtained);
+          const rowMarks = {};
+          for (const item of ledger) {
+            if (!item?.enabled_in_exam) continue;
+            const code = String(item.component_code ?? "").trim();
+            if (!code) continue;
+            rowMarks[code] = item.marks_obtained == null ? "" : String(item.marks_obtained);
+          }
+          marksInit[enrollment_id] = rowMarks;
+        } catch (e) {
+          errors.push({
+            enrollment_id,
+            symbol_no: s.symbol_no,
+            name: s.full_name,
+            message: e?.response?.data?.message || e.message || "Ledger load failed",
+          });
+          ledgers[enrollment_id] = [];
+          marksInit[enrollment_id] = {};
         }
-        marksInit[enrollment_id] = rowMarks;
       }
 
       setLedgerByEnrollment(ledgers);
@@ -356,7 +383,12 @@ export default function MarksGridPage() {
       }
       setOptionalByEnrollment(optInit);
 
-      toast.success("Ledgers loaded for section");
+      if (errors.length === 0) {
+        toast.success("Ledgers loaded for batch");
+      } else {
+        toast.error(`Loaded with ${errors.length} error(s). Check console.`);
+        console.table(errors);
+      }
     } catch (e) {
       toast.error(e?.response?.data?.message || e.message || "Failed to load ledgers");
     } finally {
@@ -369,6 +401,84 @@ export default function MarksGridPage() {
     loadLedgers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canLoad]);
+
+  const loadGrades = async () => {
+    if (!canLoad) return;
+    if (!examId) return;
+    if (students.length === 0) return;
+
+    try {
+      setLoadingGrades(true);
+      setGradeProgress({ done: 0, total: students.length });
+
+      const out = {};
+      const errors = [];
+
+      for (let i = 0; i < students.length; i++) {
+        const s = students[i];
+        const enrollment_id = s.enrollment_id;
+
+        try {
+          const res = await api.get(
+            `/api/results/${examId}/enrollments/${enrollment_id}/preview`
+          );
+          const result =
+            res.data?.result ?? res.data?.summary ?? res.data?.data ?? res.data ?? {};
+          const subjectArr = Array.isArray(result.subjects)
+            ? result.subjects
+            : Array.isArray(result.subject_results)
+            ? result.subject_results
+            : [];
+
+          const subjectMap = {};
+          for (const subj of subjectArr) {
+            const sid = subj.subject_id ?? subj.id;
+            if (sid == null) continue;
+            subjectMap[String(sid)] = {
+              grade: subj.grade ?? subj.final_grade ?? "",
+              gpa: subj.gpa ?? subj.grade_point ?? "",
+            };
+          }
+
+          out[enrollment_id] = {
+            subjects: subjectMap,
+            overall_grade: result.final_grade ?? result.grade ?? "",
+            overall_gpa: result.overall_gpa ?? result.gpa ?? "",
+          };
+        } catch (e) {
+          errors.push({
+            enrollment_id,
+            symbol_no: s.symbol_no,
+            name: s.full_name,
+            message: e?.response?.data?.message || e.message || "Grade load failed",
+          });
+          out[enrollment_id] = { subjects: {}, overall_grade: "", overall_gpa: "" };
+        } finally {
+          setGradeProgress({ done: i + 1, total: students.length });
+        }
+      }
+
+      setGradesByEnrollment(out);
+
+      if (errors.length === 0) {
+        toast.success("Grade ledger loaded");
+      } else {
+        toast.error(`Grades loaded with ${errors.length} error(s). Check console.`);
+        console.table(errors);
+      }
+    } catch (e) {
+      toast.error(e?.response?.data?.message || e.message || "Failed to load grades");
+    } finally {
+      setLoadingGrades(false);
+    }
+  };
+
+  useEffect(() => {
+    if (viewMode !== "grade") return;
+    if (!canLoad) return;
+    loadGrades();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, canLoad]);
 
   useEffect(() => {
     if (!Object.keys(ledgerByEnrollment || {}).length) return;
@@ -617,14 +727,17 @@ export default function MarksGridPage() {
       String(current.full_name || "") !== String(base.full_name || "") ||
       String(current.symbol_no || "") !== String(base.symbol_no || "") ||
       String(current.regd_no || "") !== String(base.regd_no || "") ||
+      String(current.roll_no || "") !== String(base.roll_no || "") ||
       String(current.dob || "") !== String(base.dob || "")
     );
   };
 
+  const isLedgerMode = viewMode === "ledger" || viewMode === "grade";
+
   // ---------------- SAVE ONE ----------------
   const saveOne = useMutation({
     mutationFn: async ({ enrollment_id, student }) => {
-      if (viewMode === "ledger") {
+      if (isLedgerMode) {
         if (student && studentNeedsUpdate(enrollment_id)) {
           const current = getStudentEdit(enrollment_id);
           if (!current.full_name || !current.symbol_no) {
@@ -634,7 +747,7 @@ export default function MarksGridPage() {
             full_name: current.full_name,
             symbol_no: current.symbol_no,
             regd_no: current.regd_no || null,
-            roll_no: student.roll_no || null,
+            roll_no: current.roll_no || null,
             dob: current.dob || null,
           });
           studentBaselineRef.current = {
@@ -653,7 +766,7 @@ export default function MarksGridPage() {
       }
 
       const items =
-        viewMode === "ledger"
+        isLedgerMode
           ? buildLedgerMarks(enrollment_id)
           : buildDetailedMarks(enrollment_id);
       const payload = { marks: items };
@@ -669,7 +782,7 @@ export default function MarksGridPage() {
 
   // ---------------- SAVE ALL ----------------
   const saveAll = async () => {
-    if (!examId || !sectionId) return toast.error("Select exam and section first");
+    if (!examId || !batchId) return toast.error("Select exam and batch first");
     if (isLocked) return toast.error("Exam is locked/published. Cannot save.");
     if (students.length === 0) return toast.error("No students found");
 
@@ -683,7 +796,7 @@ export default function MarksGridPage() {
         const eid = s.enrollment_id;
 
         try {
-          if (viewMode === "ledger") {
+          if (isLedgerMode) {
             if (studentNeedsUpdate(eid)) {
               const current = getStudentEdit(eid);
               if (!current.full_name || !current.symbol_no) {
@@ -693,7 +806,7 @@ export default function MarksGridPage() {
                 full_name: current.full_name,
                 symbol_no: current.symbol_no,
                 regd_no: current.regd_no || null,
-                roll_no: s.roll_no || null,
+                roll_no: current.roll_no || null,
                 dob: current.dob || null,
               });
               studentBaselineRef.current = {
@@ -710,7 +823,7 @@ export default function MarksGridPage() {
           }
 
           const items =
-            viewMode === "ledger"
+            isLedgerMode
               ? buildLedgerMarks(eid)
               : buildDetailedMarks(eid);
           const payload = { marks: items };
@@ -741,7 +854,7 @@ export default function MarksGridPage() {
   };
 
   const generateAll = async () => {
-    if (!examId || !sectionId) return toast.error("Select exam and section first");
+    if (!examId || !batchId) return toast.error("Select exam and batch first");
     if (isLocked) return toast.error("Exam is locked/published. Cannot generate.");
     if (students.length === 0) return toast.error("No students found");
 
@@ -791,7 +904,7 @@ export default function MarksGridPage() {
       setImportSummary(data);
       setImportFile(null);
       toast.success(`Imported ${data?.imported || 0} rows`);
-      if (sectionId) {
+      if (batchId) {
         loadLedgers();
         studentsQ.refetch?.();
       }
@@ -875,7 +988,7 @@ export default function MarksGridPage() {
       const v = Number(row[code]);
       if (Number.isFinite(v)) sum += v;
     }
-    return sum > 0 ? Number(sum.toFixed(2)) : "";
+    return Number.isFinite(sum) ? Number(sum.toFixed(2)) : "";
   };
 
   // ---------------- PREVIEW MUTATION ----------------
@@ -950,7 +1063,7 @@ export default function MarksGridPage() {
       <div>
         <h2 className="text-lg font-semibold">Marks Entry (Bulk Grid)</h2>
         <p className="text-sm text-muted-foreground">
-          Section-wise bulk marks entry with a simplified Mark Ledger view.
+          Batch-wise bulk marks entry with a simplified Mark Ledger view.
         </p>
       </div>
 
@@ -965,11 +1078,11 @@ export default function MarksGridPage() {
               placeholder={examsQ.isLoading ? "Loading exams..." : "Select exam"}
             />
             <Select
-              label="Section"
-              value={sectionId}
-              onChange={setSectionId}
-              options={sectionOptions}
-              placeholder={sectionsQ.isLoading ? "Loading sections..." : "Select section"}
+              label="Batch"
+              value={batchId}
+              onChange={setBatchId}
+              options={batchOptions}
+              placeholder={batchesQ.isLoading ? "Loading batches..." : "Select batch"}
             />
           </div>
 
@@ -985,10 +1098,10 @@ export default function MarksGridPage() {
                 <Badge variant="outline">Select exam</Badge>
               )}
 
-              {sectionId ? (
-                <Badge variant="outline">Section #{sectionId}</Badge>
+              {batchId ? (
+                <Badge variant="outline">Batch #{batchId}</Badge>
               ) : (
-                <Badge variant="outline">Select section</Badge>
+                <Badge variant="outline">Select batch</Badge>
               )}
 
               <Badge variant="outline">Students: {studentsQ.isLoading ? "…" : students.length}</Badge>
@@ -996,6 +1109,10 @@ export default function MarksGridPage() {
               {viewMode === "detailed" ? (
                 <Badge variant="outline">
                   Columns: {visibleColumns.length}/{columns.length}
+                </Badge>
+              ) : viewMode === "grade" ? (
+                <Badge variant="outline">
+                  Grade Ledger {Object.keys(gradesByEnrollment || {}).length}/{students.length}
                 </Badge>
               ) : (
                 <Badge variant="outline">
@@ -1008,7 +1125,14 @@ export default function MarksGridPage() {
                   variant={viewMode === "ledger" ? "secondary" : "outline"}
                   onClick={() => setViewMode("ledger")}
                 >
-                  Ledger View
+                  Mark Ledger
+                </Button>
+                <Button
+                  size="sm"
+                  variant={viewMode === "grade" ? "secondary" : "outline"}
+                  onClick={() => setViewMode("grade")}
+                >
+                  Grade Ledger
                 </Button>
                 <Button
                   size="sm"
@@ -1057,13 +1181,30 @@ export default function MarksGridPage() {
                 </>
               ) : null}
 
-              <Button
-                variant="outline"
-                onClick={loadLedgers}
-                disabled={!canLoad || loadingLedgers}
-              >
-                {loadingLedgers ? "Loading..." : "Reload Ledgers"}
-              </Button>
+              {viewMode === "grade" ? (
+                <>
+                  {loadingGrades ? (
+                    <Badge variant="outline">
+                      Grades {gradeProgress.done}/{gradeProgress.total}
+                    </Badge>
+                  ) : null}
+                  <Button
+                    variant="outline"
+                    onClick={loadGrades}
+                    disabled={!canLoad || loadingGrades}
+                  >
+                    {loadingGrades ? "Loading..." : "Reload Grades"}
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  variant="outline"
+                  onClick={loadLedgers}
+                  disabled={!canLoad || loadingLedgers}
+                >
+                  {loadingLedgers ? "Loading..." : "Reload Ledgers"}
+                </Button>
+              )}
 
               {savingAll ? (
                 <Badge variant="outline">
@@ -1074,7 +1215,13 @@ export default function MarksGridPage() {
               <Button
                 variant="outline"
                 onClick={saveAll}
-                disabled={!examId || !sectionId || savingAll || loadingLedgers || isLocked}
+                disabled={
+                  !examId ||
+                  !batchId ||
+                  savingAll ||
+                  loadingLedgers ||
+                  isLocked
+                }
               >
                 {savingAll ? "Saving..." : "Save All"}
               </Button>
@@ -1088,7 +1235,7 @@ export default function MarksGridPage() {
               <Button
                 variant="secondary"
                 onClick={generateAll}
-                disabled={!examId || !sectionId || generatingAll || loadingLedgers || isLocked}
+                disabled={!examId || !batchId || generatingAll || loadingLedgers || isLocked}
               >
                 {generatingAll ? "Generating..." : "Generate All"}
               </Button>
@@ -1177,9 +1324,9 @@ export default function MarksGridPage() {
         </div>
 
         <div className="p-3">
-          {!examId || !sectionId ? (
+          {!examId || !batchId ? (
             <div className="text-sm text-muted-foreground">
-              Select exam + section to load bulk grid.
+              Select exam + batch to load bulk grid.
             </div>
           ) : studentsQ.isError ? (
             <div className="text-sm text-destructive">
@@ -1191,7 +1338,7 @@ export default function MarksGridPage() {
           ) : studentsQ.isLoading || loadingLedgers ? (
             <div className="text-sm text-muted-foreground">Loading students/ledgers...</div>
           ) : students.length === 0 ? (
-            <div className="text-sm text-muted-foreground">No students found in this section.</div>
+            <div className="text-sm text-muted-foreground">No students found in this batch.</div>
           ) : visibleStudents.length === 0 ? (
             <div className="text-sm text-muted-foreground">
               No match for: <span className="font-medium">{studentQuery}</span>
@@ -1215,6 +1362,18 @@ export default function MarksGridPage() {
                             position: "sticky",
                             left: 0,
                             zIndex: 70,
+                            width: STICKY.SN_W,
+                            minWidth: STICKY.SN_W,
+                          }}
+                        >
+                          SN
+                        </th>
+                        <th
+                          className="p-2 text-left bg-muted border-r shadow-sm"
+                          style={{
+                            position: "sticky",
+                            left: STICKY.SN_W,
+                            zIndex: 70,
                             width: STICKY.SYMBOL_W,
                             minWidth: STICKY.SYMBOL_W,
                           }}
@@ -1225,43 +1384,21 @@ export default function MarksGridPage() {
                           className="p-2 text-left bg-muted border-r shadow-sm"
                           style={{
                             position: "sticky",
-                            left: STICKY.SYMBOL_W,
-                            zIndex: 70,
-                            width: STICKY.REGD_W,
-                            minWidth: STICKY.REGD_W,
-                          }}
-                        >
-                          Regd. No.
-                        </th>
-                        <th
-                          className="p-2 text-left bg-muted border-r shadow-sm"
-                          style={{
-                            position: "sticky",
-                            left: STICKY.SYMBOL_W + STICKY.REGD_W,
-                            zIndex: 70,
-                            width: STICKY.DOB_W,
-                            minWidth: STICKY.DOB_W,
-                          }}
-                        >
-                          DOB
-                        </th>
-                        <th
-                          className="p-2 text-left bg-muted border-r shadow-sm"
-                          style={{
-                            position: "sticky",
-                            left: STICKY.SYMBOL_W + STICKY.REGD_W + STICKY.DOB_W,
+                            left: STICKY.SN_W + STICKY.SYMBOL_W,
                             zIndex: 70,
                             width: STICKY.STUDENT_W,
                             minWidth: STICKY.STUDENT_W,
                           }}
                         >
-                          Name
+                          Name of Student
                         </th>
 
                         {compulsoryCols.map((c) => (
                           <th key={c.component_code} className="p-2 text-center border-l">
                             <div className="font-semibold">{c.label}</div>
-                            <div className="text-[10px] text-muted-foreground">TH</div>
+                            <div className="text-[10px] text-muted-foreground">
+                              TH{c.full_marks != null ? ` • ${c.full_marks}` : ""}
+                            </div>
                           </th>
                         ))}
 
@@ -1273,7 +1410,9 @@ export default function MarksGridPage() {
                             </th>
                             <th className="p-2 text-center border-l">
                               <div className="font-semibold">{g.name}</div>
-                              <div className="text-[10px] text-muted-foreground">TH</div>
+                              <div className="text-[10px] text-muted-foreground">
+                                TH
+                              </div>
                             </th>
                           </Fragment>
                         ))}
@@ -1301,13 +1440,32 @@ export default function MarksGridPage() {
                         const eid = s.enrollment_id;
                         const row = marksByEnrollment[eid] || {};
                         const edits = studentEdits[eid] || {};
-                        const leftSymbol = 0;
-                        const leftRegd = STICKY.SYMBOL_W;
-                        const leftDob = STICKY.SYMBOL_W + STICKY.REGD_W;
-                        const leftName = STICKY.SYMBOL_W + STICKY.REGD_W + STICKY.DOB_W;
+                        const total = getRowTotal(eid);
+                        const leftSn = 0;
+                        const leftSymbol = STICKY.SN_W;
+                        const leftName = STICKY.SN_W + STICKY.SYMBOL_W;
 
                         return (
                           <tr key={eid} className={rowIndex % 2 ? "bg-muted/20" : ""}>
+                            <td
+                              className="p-2 bg-background border-r shadow-sm"
+                              style={{
+                                position: "sticky",
+                                left: leftSn,
+                                zIndex: 20,
+                                width: STICKY.SN_W,
+                                minWidth: STICKY.SN_W,
+                              }}
+                            >
+                              <Input
+                                className="h-8 text-center"
+                                value={edits.roll_no || ""}
+                                placeholder={String(rowIndex + 1)}
+                                onChange={(e) =>
+                                  setStudentField(eid, "roll_no", e.target.value)
+                                }
+                              />
+                            </td>
                             <td
                               className="p-2 bg-background border-r shadow-sm"
                               style={{
@@ -1323,43 +1481,6 @@ export default function MarksGridPage() {
                                 value={edits.symbol_no || ""}
                                 onChange={(e) =>
                                   setStudentField(eid, "symbol_no", e.target.value)
-                                }
-                              />
-                            </td>
-                            <td
-                              className="p-2 bg-background border-r shadow-sm"
-                              style={{
-                                position: "sticky",
-                                left: leftRegd,
-                                zIndex: 20,
-                                width: STICKY.REGD_W,
-                                minWidth: STICKY.REGD_W,
-                              }}
-                            >
-                              <Input
-                                className="h-8"
-                                value={edits.regd_no || ""}
-                                onChange={(e) =>
-                                  setStudentField(eid, "regd_no", e.target.value)
-                                }
-                              />
-                            </td>
-                            <td
-                              className="p-2 bg-background border-r shadow-sm"
-                              style={{
-                                position: "sticky",
-                                left: leftDob,
-                                zIndex: 20,
-                                width: STICKY.DOB_W,
-                                minWidth: STICKY.DOB_W,
-                              }}
-                            >
-                              <Input
-                                className="h-8"
-                                type="date"
-                                value={edits.dob || ""}
-                                onChange={(e) =>
-                                  setStudentField(eid, "dob", e.target.value)
                                 }
                               />
                             </td>
@@ -1474,7 +1595,7 @@ export default function MarksGridPage() {
                             })}
 
                             <td className="p-2 text-center border-l font-medium">
-                              {getRowTotal(eid) || "—"}
+                              {total === "" ? "—" : total}
                             </td>
 
                             <td
@@ -1530,9 +1651,228 @@ export default function MarksGridPage() {
                   </table>
 
                   <Separator />
-                  <div className="p-3 text-xs text-muted-foreground">
+                    <div className="p-3 text-xs text-muted-foreground">
                     Notes: Optional codes set the student’s optional subjects. Save rows after
-                    entering codes and marks.
+                    entering codes and marks. Regd/DOB can be edited from the Students page.
+                    </div>
+                </div>
+              </div>
+            )
+          ) : viewMode === "grade" ? (
+            loadingGrades ? (
+              <div className="text-sm text-muted-foreground">Loading grade ledger...</div>
+            ) : examComponentsQ.isLoading ? (
+              <div className="text-sm text-muted-foreground">Loading subjects...</div>
+            ) : compulsoryCols.length === 0 ? (
+              <div className="text-sm text-muted-foreground">
+                No compulsory subjects configured. Configure exam components first.
+              </div>
+            ) : (
+              <div className="w-full">
+                <div className="relative w-full overflow-x-auto overflow-y-auto max-h-[72vh] rounded-md border">
+                  <table className="min-w-max w-max text-sm">
+                    <thead className="bg-muted sticky top-0 z-30">
+                      <tr>
+                        <th
+                          className="p-2 text-left bg-muted border-r shadow-sm"
+                          rowSpan={2}
+                          style={{
+                            position: "sticky",
+                            left: 0,
+                            zIndex: 70,
+                            width: STICKY.SN_W,
+                            minWidth: STICKY.SN_W,
+                          }}
+                        >
+                          SN
+                        </th>
+                        <th
+                          className="p-2 text-left bg-muted border-r shadow-sm"
+                          rowSpan={2}
+                          style={{
+                            position: "sticky",
+                            left: STICKY.SN_W,
+                            zIndex: 70,
+                            width: STICKY.SYMBOL_W,
+                            minWidth: STICKY.SYMBOL_W,
+                          }}
+                        >
+                          Symbol No.
+                        </th>
+                        <th
+                          className="p-2 text-left bg-muted border-r shadow-sm"
+                          rowSpan={2}
+                          style={{
+                            position: "sticky",
+                            left: STICKY.SN_W + STICKY.SYMBOL_W,
+                            zIndex: 70,
+                            width: STICKY.STUDENT_W,
+                            minWidth: STICKY.STUDENT_W,
+                          }}
+                        >
+                          Name of Student
+                        </th>
+
+                        {compulsoryCols.map((c) => (
+                          <th
+                            key={c.subject_id}
+                            className="p-2 text-center border-l font-semibold"
+                            colSpan={2}
+                          >
+                            {c.label}
+                          </th>
+                        ))}
+
+                        {optionalGroups.map((g) => (
+                          <th
+                            key={g.name}
+                            className="p-2 text-center border-l font-semibold"
+                            colSpan={3}
+                          >
+                            {g.name}
+                          </th>
+                        ))}
+
+                        <th className="p-2 text-center border-l font-semibold" colSpan={2}>
+                          Grand Total
+                        </th>
+                      </tr>
+                      <tr>
+                        {compulsoryCols.map((c) => (
+                          <Fragment key={`sub-${c.subject_id}`}>
+                            <th className="p-2 text-center border-l text-[11px]">
+                              TH Grade
+                            </th>
+                            <th className="p-2 text-center border-l text-[11px]">
+                              TH GPA
+                            </th>
+                          </Fragment>
+                        ))}
+
+                        {optionalGroups.map((g) => (
+                          <Fragment key={`sub-${g.name}`}>
+                            <th className="p-2 text-center border-l text-[11px]">
+                              Sub. Code
+                            </th>
+                            <th className="p-2 text-center border-l text-[11px]">
+                              TH Grade
+                            </th>
+                            <th className="p-2 text-center border-l text-[11px]">
+                              TH GPA
+                            </th>
+                          </Fragment>
+                        ))}
+
+                        <th className="p-2 text-center border-l text-[11px]">TH Grade</th>
+                        <th className="p-2 text-center border-l text-[11px]">TH GPA</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleStudents.map((s, rowIndex) => {
+                        const eid = s.enrollment_id;
+                        const edits = studentEdits[eid] || {};
+                        const gradeRow = gradesByEnrollment[eid] || {};
+                        const subjectMap = gradeRow.subjects || {};
+                        const leftSn = 0;
+                        const leftSymbol = STICKY.SN_W;
+                        const leftName = STICKY.SN_W + STICKY.SYMBOL_W;
+
+                        const getSubGrade = (subjectId) =>
+                          subjectMap[String(subjectId)] || {};
+
+                        return (
+                          <tr key={eid} className={rowIndex % 2 ? "bg-muted/20" : ""}>
+                            <td
+                              className="p-2 bg-background border-r shadow-sm"
+                              style={{
+                                position: "sticky",
+                                left: leftSn,
+                                zIndex: 20,
+                                width: STICKY.SN_W,
+                                minWidth: STICKY.SN_W,
+                              }}
+                            >
+                              <div className="text-center font-medium">
+                                {edits.roll_no || s.roll_no || rowIndex + 1}
+                              </div>
+                            </td>
+                            <td
+                              className="p-2 bg-background border-r shadow-sm"
+                              style={{
+                                position: "sticky",
+                                left: leftSymbol,
+                                zIndex: 20,
+                                width: STICKY.SYMBOL_W,
+                                minWidth: STICKY.SYMBOL_W,
+                              }}
+                            >
+                              {edits.symbol_no || s.symbol_no || "—"}
+                            </td>
+                            <td
+                              className="p-2 bg-background border-r shadow-sm"
+                              style={{
+                                position: "sticky",
+                                left: leftName,
+                                zIndex: 20,
+                                width: STICKY.STUDENT_W,
+                                minWidth: STICKY.STUDENT_W,
+                              }}
+                            >
+                              {edits.full_name || s.full_name || "—"}
+                            </td>
+
+                            {compulsoryCols.map((c) => {
+                              const g = getSubGrade(c.subject_id);
+                              return (
+                                <Fragment key={`row-${eid}-${c.subject_id}`}>
+                                  <td className="p-2 text-center border-l">
+                                    {g.grade || "—"}
+                                  </td>
+                                  <td className="p-2 text-center border-l">
+                                    {formatGpa(g.gpa)}
+                                  </td>
+                                </Fragment>
+                              );
+                            })}
+
+                            {optionalGroups.map((g) => {
+                              const optCode =
+                                (optionalByEnrollment?.[eid] || {})[g.name] || "";
+                              const meta = optCode
+                                ? optionalCodeMap.get(String(optCode))
+                                : null;
+                              const g2 = meta ? getSubGrade(meta.subject_id) : {};
+
+                              return (
+                                <Fragment key={`row-${eid}-${g.name}`}>
+                                  <td className="p-2 text-center border-l">
+                                    {optCode || "—"}
+                                  </td>
+                                  <td className="p-2 text-center border-l">
+                                    {g2.grade || "—"}
+                                  </td>
+                                  <td className="p-2 text-center border-l">
+                                    {formatGpa(g2.gpa)}
+                                  </td>
+                                </Fragment>
+                              );
+                            })}
+
+                            <td className="p-2 text-center border-l font-medium">
+                              {gradeRow.overall_grade || "—"}
+                            </td>
+                            <td className="p-2 text-center border-l font-medium">
+                              {formatGpa(gradeRow.overall_gpa)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+
+                  <Separator />
+                  <div className="p-3 text-xs text-muted-foreground">
+                    Notes: Grade Ledger uses saved marks. Save marks first, then reload grades.
                   </div>
                 </div>
               </div>

@@ -88,6 +88,7 @@ export default function Sidebar({
         label: "Academics",
         icon: ClipboardList,
         children: [
+          { label: "Exam Workflow", path: "/exams/workflow", icon: ClipboardList },
           { label: "Exams", path: "/exams", icon: ClipboardList },
           { label: "Marks Entry", path: "/marks", icon: PencilRuler },
           { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
@@ -131,6 +132,7 @@ export default function Sidebar({
         label: "Academics",
         icon: ClipboardList,
         children: [
+          { label: "Exam Workflow", path: "/exams/workflow", icon: ClipboardList },
           { label: "Exams", path: "/exams", icon: ClipboardList },
           { label: "Marks Entry", path: "/marks", icon: PencilRuler },
           { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
@@ -172,6 +174,7 @@ export default function Sidebar({
         label: "Academics",
         icon: ClipboardList,
         children: [
+          { label: "Exam Workflow", path: "/exams/workflow", icon: ClipboardList },
           { label: "Marks Entry", path: "/marks", icon: PencilRuler },
           { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
         ],

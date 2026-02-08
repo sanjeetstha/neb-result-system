@@ -22,9 +22,9 @@ async function mapWithConcurrency(items, limit, worker) {
 }
 
 async function bulkSms(req, res) {
-  const { exam_id, section_id, template, targets, preview_only } = req.body || {};
+  const { exam_id, batch_id, template, targets, preview_only } = req.body || {};
   const examId = Number(exam_id);
-  const sectionId = section_id ? Number(section_id) : null;
+  const batchId = batch_id ? Number(batch_id) : null;
 
   if (!examId) return res.status(400).json({ ok: false, message: "exam_id required" });
   if (!Array.isArray(targets) || targets.length === 0) {
@@ -48,9 +48,9 @@ async function bulkSms(req, res) {
     WHERE s.symbol_no IN (?)
   `;
   const params = [symbolNos];
-  if (sectionId) {
-    sql += ` AND e.section_id=?`;
-    params.push(sectionId);
+  if (batchId) {
+    sql += ` AND e.batch_id=?`;
+    params.push(batchId);
   }
 
   const [enrollRows] = await db.query(sql, params);

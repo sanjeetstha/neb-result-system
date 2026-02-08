@@ -3,11 +3,43 @@ const db = require("../db");
 async function createStudent(req, res) {
   const {
     full_name, dob, symbol_no, regd_no, roll_no,
-    campus_id, academic_year_id, class_id, faculty_id, section_id
+    campus_id, academic_year_id, class_id, faculty_id, batch_id
   } = req.body || {};
 
-  if (!full_name || !campus_id || !academic_year_id || !class_id || !faculty_id || !section_id) {
-    return res.status(400).json({ ok: false, message: "full_name + campus_id + academic_year_id + class_id + faculty_id + section_id required" });
+  if (!full_name || !class_id || !batch_id) {
+    return res.status(400).json({ ok: false, message: "full_name + class_id + batch_id required" });
+  }
+
+  // Resolve academic year from batch if not provided
+  let resolvedAcademicYearId = academic_year_id ? Number(academic_year_id) : null;
+  if (!resolvedAcademicYearId) {
+    const [[ay]] = await db.query(
+      `SELECT id FROM academic_years WHERE batch_id=? ORDER BY id DESC LIMIT 1`,
+      [batch_id]
+    );
+    resolvedAcademicYearId = ay?.id || null;
+  }
+  if (!resolvedAcademicYearId) {
+    return res.status(400).json({ ok: false, message: "academic_year_id not found for batch" });
+  }
+
+  // Resolve campus/faculty if not provided
+  let resolvedCampusId = campus_id ? Number(campus_id) : null;
+  if (!resolvedCampusId) {
+    const [[campus]] = await db.query(`SELECT id FROM campuses ORDER BY id ASC LIMIT 1`);
+    resolvedCampusId = campus?.id || null;
+  }
+  if (!resolvedCampusId) {
+    return res.status(400).json({ ok: false, message: "campus_id required" });
+  }
+
+  let resolvedFacultyId = faculty_id ? Number(faculty_id) : null;
+  if (!resolvedFacultyId) {
+    const [[fac]] = await db.query(`SELECT id FROM faculties ORDER BY id ASC LIMIT 1`);
+    resolvedFacultyId = fac?.id || null;
+  }
+  if (!resolvedFacultyId) {
+    return res.status(400).json({ ok: false, message: "faculty_id required" });
   }
 
   // create student
@@ -19,38 +51,51 @@ async function createStudent(req, res) {
 
   // enrollment
   const [r2] = await db.query(
-    `INSERT INTO student_enrollments (student_id, campus_id, academic_year_id, class_id, faculty_id, section_id)
+    `INSERT INTO student_enrollments (student_id, campus_id, academic_year_id, class_id, faculty_id, batch_id)
      VALUES (?,?,?,?,?,?)`,
-    [r1.insertId, campus_id, academic_year_id, class_id, faculty_id, section_id]
+    [r1.insertId, resolvedCampusId, resolvedAcademicYearId, class_id, resolvedFacultyId, batch_id]
   );
 
   res.json({ ok: true, student_id: r1.insertId, enrollment_id: r2.insertId });
 }
 
 async function listStudents(req, res) {
-  const section_id = req.query.section_id ? Number(req.query.section_id) : null;
+  const batch_id = req.query.batch_id ? Number(req.query.batch_id) : null;
+  const class_id = req.query.class_id ? Number(req.query.class_id) : null;
 
-  let sql = `
-    SELECT e.id AS enrollment_id, s.id AS student_id, s.full_name, s.symbol_no, s.regd_no, s.roll_no, s.dob,
-           ay.year_bs AS academic_year, c.name AS class, f.name AS faculty, sec.name AS section
-    FROM student_enrollments e
-    JOIN students s ON s.id=e.student_id
-    JOIN academic_years ay ON ay.id=e.academic_year_id
-    JOIN classes c ON c.id=e.class_id
-    JOIN faculties f ON f.id=e.faculty_id
-    JOIN sections sec ON sec.id=e.section_id
-  `;
-  const params = [];
+  try {
+    let sql = `
+      SELECT e.id AS enrollment_id, s.id AS student_id, s.full_name, s.symbol_no, s.regd_no, s.roll_no, s.dob,
+             ay.year_bs AS academic_year, c.name AS class, f.name AS faculty, b.name AS batch
+      FROM student_enrollments e
+      JOIN students s ON s.id=e.student_id
+      JOIN academic_years ay ON ay.id=e.academic_year_id
+      JOIN classes c ON c.id=e.class_id
+      JOIN faculties f ON f.id=e.faculty_id
+      LEFT JOIN batches b ON b.id=e.batch_id
+    `;
+    const params = [];
 
-  if (section_id) {
-    sql += ` WHERE e.section_id=? `;
-    params.push(section_id);
+    if (batch_id) {
+      sql += ` WHERE e.batch_id=? `;
+      params.push(batch_id);
+    }
+    if (class_id) {
+      sql += batch_id ? ` AND e.class_id=? ` : ` WHERE e.class_id=? `;
+      params.push(class_id);
+    }
+
+    sql += ` ORDER BY s.full_name ASC`;
+
+    const [rows] = await db.query(sql, params);
+    res.json({ ok: true, students: rows });
+  } catch (e) {
+    res.json({
+      ok: false,
+      message: e?.message || "Failed to load students",
+      students: [],
+    });
   }
-
-  sql += ` ORDER BY s.full_name ASC`;
-
-  const [rows] = await db.query(sql, params);
-  res.json({ ok: true, students: rows });
 }
 
 async function updateStudent(req, res) {
@@ -106,7 +151,7 @@ async function getStudentProfile(req, res) {
 
   const [[en]] = await db.query(
     `SELECT e.id AS enrollment_id, s.id AS student_id, s.full_name, s.symbol_no, s.regd_no, s.roll_no, s.dob,
-            e.campus_id, e.academic_year_id, e.class_id, e.faculty_id, e.section_id
+            e.campus_id, e.academic_year_id, e.class_id, e.faculty_id, e.batch_id
      FROM student_enrollments e
      JOIN students s ON s.id=e.student_id
      WHERE e.id=? LIMIT 1`,
