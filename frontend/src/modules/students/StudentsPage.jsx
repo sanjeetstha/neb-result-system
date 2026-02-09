@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
 import { usePagination } from "../../lib/usePagination";
+import { useMe } from "../../lib/useMe";
+import { Trash2, Trash } from "lucide-react";
 
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -147,6 +149,8 @@ function normalizeStudentPayload(form) {
 
 export default function StudentsPage() {
   const qc = useQueryClient();
+  const meQ = useMe();
+  const me = meQ.data;
 
   const [batchId, setBatchId] = useState("");
   const [classId, setClassId] = useState("");
@@ -166,6 +170,14 @@ export default function StudentsPage() {
     regd_no: "",
     roll_no: "",
   });
+
+  // Bulk delete dialog state
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteMode, setDeleteMode] = useState("batch"); // batch | selected | single
+  const [deleteTargets, setDeleteTargets] = useState([]);
+
+  const [selectedIds, setSelectedIds] = useState(new Set());
 
   // create form
   const [form, setForm] = useState({
@@ -361,7 +373,65 @@ export default function StudentsPage() {
     }));
   }, [studentsQ.data]);
 
+  const bulkDelete = useMutation({
+    mutationFn: async (password) => {
+      const res = await api.delete("/api/students/bulk", {
+        data: { batch_id: batchId, class_id: classId, password },
+      });
+      return res.data;
+    },
+    onSuccess: async (data) => {
+      toast.success(data?.message || "Students deleted");
+      setDeleteOpen(false);
+      setDeletePassword("");
+      await qc.invalidateQueries({ queryKey: ["students", "list"] });
+    },
+    onError: (e) => {
+      toast.error(e?.response?.data?.message || e.message || "Delete failed");
+    },
+  });
+
+  const deleteEnrollments = useMutation({
+    mutationFn: async ({ ids, password }) => {
+      const errors = [];
+      for (let i = 0; i < ids.length; i++) {
+        const eid = ids[i];
+        try {
+          await api.delete(`/api/students/enrollments/${eid}`, {
+            data: { password },
+          });
+        } catch (e) {
+          errors.push({
+            enrollment_id: eid,
+            message: e?.response?.data?.message || e.message || "Delete failed",
+          });
+        }
+      }
+      return { deleted: ids.length - errors.length, errors };
+    },
+    onSuccess: async (data) => {
+      if (data.errors?.length) {
+        toast.error(`Deleted with ${data.errors.length} error(s). Check console.`);
+        console.table(data.errors);
+      } else {
+        toast.success("Students deleted");
+      }
+      setDeleteOpen(false);
+      setDeletePassword("");
+      setSelectedIds(new Set());
+      await qc.invalidateQueries({ queryKey: ["students", "list"] });
+    },
+    onError: (e) => {
+      toast.error(e?.response?.data?.message || e.message || "Delete failed");
+    },
+  });
+
   const pager = usePagination(rows, 20);
+
+  // clear selection when filters change
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [batchId, classId]);
 
   // When profile loads, initialize optDraft from server optional_choices
   useEffect(() => {
@@ -477,10 +547,62 @@ export default function StudentsPage() {
                 : "Choose a batch and class to load students."}
             </div>
 
-            <Dialog open={open} onOpenChange={setOpen}>
-              <DialogTrigger asChild>
-                <Button disabled={!batchId || !classId}>Add Student</Button>
-              </DialogTrigger>
+            <div className="flex items-center gap-2">
+              {me?.role === "SUPER_ADMIN" || me?.role === "ADMIN" ? (
+                <>
+                  <div className="relative group">
+                    <Button
+                      variant="destructive"
+                      size="icon"
+                      aria-label="Delete Batch Students"
+                      disabled={!batchId || !classId || bulkDelete.isPending || rows.length === 0}
+                      onClick={() => {
+                        if (!batchId || !classId) {
+                          toast.error("Select batch and class first");
+                          return;
+                        }
+                        setDeleteMode("batch");
+                        setDeleteTargets([]);
+                        setDeletePassword("");
+                        setDeleteOpen(true);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                    <span className="pointer-events-none absolute -top-9 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-foreground px-2 py-1 text-[10px] text-background opacity-0 shadow group-hover:opacity-100">
+                      Delete all students in this batch/class
+                    </span>
+                  </div>
+                  <div className="relative group">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      aria-label="Delete Selected Students"
+                      disabled={selectedIds.size === 0}
+                      onClick={() => {
+                        if (selectedIds.size === 0) {
+                          toast.error("Select students first");
+                          return;
+                        }
+                        setDeleteMode("selected");
+                        setDeleteTargets(Array.from(selectedIds));
+                        setDeletePassword("");
+                        setDeleteOpen(true);
+                      }}
+                    >
+                      <Trash className="h-4 w-4" />
+                    </Button>
+                    <span className="pointer-events-none absolute -top-9 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-foreground px-2 py-1 text-[10px] text-background opacity-0 shadow group-hover:opacity-100">
+                      Delete selected students ({selectedIds.size})
+                    </span>
+                  </div>
+                </>
+              ) : null}
+
+              <Dialog open={open} onOpenChange={setOpen}>
+                <DialogTrigger asChild>
+                  <Button disabled={!batchId || !classId}>Add Student</Button>
+                </DialogTrigger>
 
               <DialogContent>
                 <DialogHeader>
@@ -548,6 +670,7 @@ export default function StudentsPage() {
                 </div>
               </DialogContent>
             </Dialog>
+            </div>
           </div>
         </div>
       </div>
@@ -572,6 +695,25 @@ export default function StudentsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-[44px]">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all"
+                      checked={
+                        pager.pageItems.length > 0 &&
+                        pager.pageItems.every((r) => selectedIds.has(r.enrollment_id))
+                      }
+                      onChange={(e) => {
+                        const next = new Set(selectedIds);
+                        if (e.target.checked) {
+                          pager.pageItems.forEach((r) => next.add(r.enrollment_id));
+                        } else {
+                          pager.pageItems.forEach((r) => next.delete(r.enrollment_id));
+                        }
+                        setSelectedIds(next);
+                      }}
+                    />
+                  </TableHead>
                   <TableHead className="w-[90px]">ID</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead className="w-[140px]">Symbol No</TableHead>
@@ -584,13 +726,26 @@ export default function StudentsPage() {
               <TableBody>
                 {pager.pageItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
                       {studentsQ.isLoading ? "Loading..." : "No students found."}
                     </TableCell>
                   </TableRow>
                 ) : (
                   pager.pageItems.map((r) => (
                     <TableRow key={r.id || r.symbol_no}>
+                      <TableCell>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${r.full_name}`}
+                          checked={selectedIds.has(r.enrollment_id)}
+                          onChange={(e) => {
+                            const next = new Set(selectedIds);
+                            if (e.target.checked) next.add(r.enrollment_id);
+                            else next.delete(r.enrollment_id);
+                            setSelectedIds(next);
+                          }}
+                        />
+                      </TableCell>
                       <TableCell className="font-mono text-xs">{r.id}</TableCell>
                       <TableCell className="font-medium">{r.full_name}</TableCell>
                       <TableCell className="font-mono text-xs">{r.symbol_no}</TableCell>
@@ -617,6 +772,21 @@ export default function StudentsPage() {
                         >
                           Profile
                         </Button>
+                        {(me?.role === "SUPER_ADMIN" || me?.role === "ADMIN") ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setDeleteMode("single");
+                              setDeleteTargets([r.enrollment_id]);
+                              setDeletePassword("");
+                              setDeleteOpen(true);
+                            }}
+                            title="Delete Student"
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        ) : null}
                       </TableCell>
                     </TableRow>
                   ))
@@ -809,6 +979,62 @@ export default function StudentsPage() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {deleteMode === "batch"
+                ? "Confirm Delete Batch Students"
+                : deleteMode === "selected"
+                ? "Confirm Delete Selected Students"
+                : "Confirm Delete Student"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="text-sm text-muted-foreground">
+              {deleteMode === "batch"
+                ? "Enter your password to delete all students in this batch/class. This will also remove their marks and results."
+                : deleteMode === "selected"
+                ? `Enter your password to delete ${deleteTargets.length} selected students. This will also remove their marks and results.`
+                : "Enter your password to delete this student and related marks/results."}
+            </div>
+            <Input
+              type="password"
+              placeholder="Password"
+              value={deletePassword}
+              onChange={(e) => setDeletePassword(e.target.value)}
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDeleteOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={
+                  !deletePassword ||
+                  (deleteMode === "batch" ? bulkDelete.isPending : deleteEnrollments.isPending)
+                }
+                onClick={() => {
+                  if (deleteMode === "batch") {
+                    bulkDelete.mutate(deletePassword);
+                  } else {
+                    deleteEnrollments.mutate({ ids: deleteTargets, password: deletePassword });
+                  }
+                }}
+              >
+                {deleteMode === "batch"
+                  ? bulkDelete.isPending
+                    ? "Deleting..."
+                    : "Confirm Delete"
+                  : deleteEnrollments.isPending
+                  ? "Deleting..."
+                  : "Confirm Delete"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

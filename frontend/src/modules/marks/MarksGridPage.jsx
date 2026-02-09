@@ -81,6 +81,7 @@ export default function MarksGridPage() {
   const [loadingGrades, setLoadingGrades] = useState(false);
   const [gradeProgress, setGradeProgress] = useState({ done: 0, total: 0 });
   const [optionalByEnrollment, setOptionalByEnrollment] = useState({});
+  const [dirtyByEnrollment, setDirtyByEnrollment] = useState({});
   const [studentEdits, setStudentEdits] = useState({});
   const studentBaselineRef = useRef({});
 
@@ -103,12 +104,13 @@ export default function MarksGridPage() {
 
   // ✅ Sticky sizes (Actions smaller)
   const STICKY = {
-    SN_W: 60,
-    SYMBOL_W: 140,
-    STUDENT_W: 260,
+    SN_W: 36,
+    SYMBOL_W: 86,
+    STUDENT_W: 140,
     ACTION_W: 220,
-    TOTAL_W: 120,
+    TOTAL_W: 76,
   };
+  const SUBJECT_COL_W = 96;
 
   // ✅ Preview dialog state
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -304,6 +306,7 @@ export default function MarksGridPage() {
     setLoadingGrades(false);
     setGradeProgress({ done: 0, total: 0 });
     setOptionalByEnrollment({});
+    setDirtyByEnrollment({});
     setStudentEdits({});
     setPreviewOpen(false);
     setPreviewStudent(null);
@@ -366,6 +369,7 @@ export default function MarksGridPage() {
 
       // ✅ set baseline for dirty tracking
       baselineRef.current = JSON.parse(JSON.stringify(marksInit));
+      setDirtyByEnrollment({});
 
       // ✅ optional code defaults (from existing ledger choices)
       const optInit = {};
@@ -609,12 +613,31 @@ export default function MarksGridPage() {
   const isRowDirty = (enrollment_id) => {
     const base = baselineRef.current?.[enrollment_id] || {};
     const now = marksByEnrollment?.[enrollment_id] || {};
-    // compare only current enabled columns to avoid noise
-    for (const c of columns) {
-      const k = c.code;
+    const keys = new Set([...Object.keys(base), ...Object.keys(now)]);
+    for (const k of keys) {
       const a = String(base?.[k] ?? "");
       const b = String(now?.[k] ?? "");
       if (a !== b) return true;
+    }
+    return false;
+  };
+
+  const isLedgerRowDirty = (enrollment_id) => {
+    if (isRowDirty(enrollment_id)) return true;
+    if (studentNeedsUpdate(enrollment_id)) return true;
+    // optional code changes
+    const ledger = ledgerByEnrollment?.[enrollment_id] || [];
+    const prev = {};
+    for (const item of ledger) {
+      if (!item?.enabled_in_exam) continue;
+      if (String(item.component_type || "").toUpperCase() !== "TH") continue;
+      const g = subjectIdToOptionalGroup.get(item.subject_id);
+      if (g && !prev[g]) prev[g] = String(item.component_code || "");
+    }
+    const now = optionalByEnrollment?.[enrollment_id] || {};
+    const keys = new Set([...Object.keys(prev), ...Object.keys(now)]);
+    for (const k of keys) {
+      if (String(prev[k] || "") !== String(now[k] || "")) return true;
     }
     return false;
   };
@@ -625,11 +648,14 @@ export default function MarksGridPage() {
       ...baselineRef.current,
       [enrollment_id]: JSON.parse(JSON.stringify(now)),
     };
+    setDirtyByEnrollment((prev) => ({ ...prev, [enrollment_id]: false }));
   };
 
   // ---------------- KEYBOARD NAVIGATION ----------------
   const inputRefs = useRef({});
   const cellKey = (enrollmentId, code) => `${enrollmentId}__${code}`;
+  const ledgerInputRefs = useRef({});
+  const ledgerCellKey = (enrollmentId, code) => `${enrollmentId}__${code}`;
 
   const focusCell = (enrollmentId, code) => {
     const k = cellKey(enrollmentId, code);
@@ -664,6 +690,27 @@ export default function MarksGridPage() {
       focusCell(enrollmentId, code);
       return;
     }
+  };
+
+  const focusLedgerCell = (enrollmentId, code) => {
+    const k = ledgerCellKey(enrollmentId, code);
+    const el = ledgerInputRefs.current[k];
+    if (el && typeof el.focus === "function") {
+      el.focus();
+      el.select?.();
+    }
+  };
+
+  const getLedgerRowCodes = (enrollment_id) => {
+    const codes = [];
+    for (const c of compulsoryCols) {
+      if (c?.component_code) codes.push(c.component_code);
+    }
+    for (const g of optionalGroups) {
+      const code = (optionalByEnrollment?.[enrollment_id] || {})[g.name];
+      if (code) codes.push(code);
+    }
+    return codes;
   };
 
   const buildLedgerMarks = (enrollment_id) => {
@@ -944,6 +991,7 @@ export default function MarksGridPage() {
       next[enrollment_id] = row;
       return next;
     });
+    setDirtyByEnrollment((prev) => ({ ...prev, [enrollment_id]: true }));
   };
 
   const setStudentField = (enrollment_id, field, value) => {
@@ -964,6 +1012,7 @@ export default function MarksGridPage() {
       row[groupName] = nextCode;
       return { ...prev, [enrollment_id]: row };
     });
+    setDirtyByEnrollment((prev) => ({ ...prev, [enrollment_id]: true }));
 
     // remove marks for old optional code if code changed
     setMarksByEnrollment((prev) => {
@@ -1060,6 +1109,20 @@ export default function MarksGridPage() {
 
   return (
     <div className="space-y-4">
+      {/* Mobile warning overlay */}
+      <div className="fixed inset-0 z-50 md:hidden">
+        <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" />
+        <div className="absolute inset-0 flex items-center justify-center p-6">
+          <div className="max-w-sm w-full rounded-lg border bg-background p-5 text-center shadow-lg">
+            <div className="text-sm font-semibold">Bulk Grid Not Suitable for Mobile</div>
+            <div className="mt-2 text-xs text-muted-foreground">
+              Please use a desktop or tablet device for bulk marks entry. The grid is
+              too wide for mobile screens.
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div>
         <h2 className="text-lg font-semibold">Marks Entry (Bulk Grid)</h2>
         <p className="text-sm text-muted-foreground">
@@ -1353,11 +1416,11 @@ export default function MarksGridPage() {
             ) : (
               <div className="w-full">
                 <div className="relative w-full overflow-x-auto overflow-y-auto max-h-[72vh] rounded-md border">
-                  <table className="min-w-max w-max text-sm">
+                  <table className="min-w-max w-max text-[10px] leading-none">
                     <thead className="bg-muted sticky top-0 z-30">
                       <tr>
                         <th
-                          className="p-2 text-left bg-muted border-r shadow-sm"
+                          className="px-0.5 py-0.5 text-left bg-muted border-r shadow-sm"
                           style={{
                             position: "sticky",
                             left: 0,
@@ -1369,7 +1432,7 @@ export default function MarksGridPage() {
                           SN
                         </th>
                         <th
-                          className="p-2 text-left bg-muted border-r shadow-sm"
+                          className="px-0.5 py-0.5 text-left bg-muted border-r shadow-sm"
                           style={{
                             position: "sticky",
                             left: STICKY.SN_W,
@@ -1381,7 +1444,7 @@ export default function MarksGridPage() {
                           Symbol No.
                         </th>
                         <th
-                          className="p-2 text-left bg-muted border-r shadow-sm"
+                          className="px-0.5 py-0.5 text-left bg-muted border-r shadow-sm"
                           style={{
                             position: "sticky",
                             left: STICKY.SN_W + STICKY.SYMBOL_W,
@@ -1394,9 +1457,19 @@ export default function MarksGridPage() {
                         </th>
 
                         {compulsoryCols.map((c) => (
-                          <th key={c.component_code} className="p-2 text-center border-l">
-                            <div className="font-semibold">{c.label}</div>
-                            <div className="text-[10px] text-muted-foreground">
+                          <th
+                            key={c.component_code}
+                            className="px-0.5 py-0.5 text-center border-l"
+                            style={{
+                              width: SUBJECT_COL_W,
+                              minWidth: SUBJECT_COL_W,
+                              maxWidth: SUBJECT_COL_W,
+                            }}
+                          >
+                            <div className="font-semibold text-[10px] leading-tight whitespace-normal break-words">
+                              {c.label}
+                            </div>
+                            <div className="text-[9px] text-muted-foreground">
                               TH{c.full_marks != null ? ` • ${c.full_marks}` : ""}
                             </div>
                           </th>
@@ -1404,25 +1477,43 @@ export default function MarksGridPage() {
 
                         {optionalGroups.map((g) => (
                           <Fragment key={g.name}>
-                            <th className="p-2 text-center border-l">
-                              <div className="font-semibold">{g.name}</div>
-                              <div className="text-[10px] text-muted-foreground">Sub. Code</div>
+                            <th
+                              className="px-0.5 py-0.5 text-center border-l"
+                              style={{
+                                width: SUBJECT_COL_W,
+                                minWidth: SUBJECT_COL_W,
+                                maxWidth: SUBJECT_COL_W,
+                              }}
+                            >
+                              <div className="font-semibold text-[10px] leading-tight whitespace-normal break-words">
+                                {g.name}
+                              </div>
+                              <div className="text-[9px] text-muted-foreground">Sub. Code</div>
                             </th>
-                            <th className="p-2 text-center border-l">
-                              <div className="font-semibold">{g.name}</div>
-                              <div className="text-[10px] text-muted-foreground">
+                            <th
+                              className="px-0.5 py-0.5 text-center border-l"
+                              style={{
+                                width: SUBJECT_COL_W,
+                                minWidth: SUBJECT_COL_W,
+                                maxWidth: SUBJECT_COL_W,
+                              }}
+                            >
+                              <div className="font-semibold text-[10px] leading-tight whitespace-normal break-words">
+                                {g.name}
+                              </div>
+                              <div className="text-[9px] text-muted-foreground">
                                 TH
                               </div>
                             </th>
                           </Fragment>
                         ))}
 
-                        <th className="p-2 text-center border-l" style={{ minWidth: STICKY.TOTAL_W }}>
+                        <th className="px-0.5 py-0.5 text-center border-l" style={{ minWidth: STICKY.TOTAL_W }}>
                           Grand Total
                         </th>
 
                         <th
-                          className="p-2 text-right bg-muted border-l shadow-sm"
+                          className="px-0.5 py-0.5 text-right bg-muted border-l shadow-sm"
                           style={{
                             position: "sticky",
                             right: 0,
@@ -1448,7 +1539,7 @@ export default function MarksGridPage() {
                         return (
                           <tr key={eid} className={rowIndex % 2 ? "bg-muted/20" : ""}>
                             <td
-                              className="p-2 bg-background border-r shadow-sm"
+                              className="px-0.5 py-0.5 bg-background border-r shadow-sm"
                               style={{
                                 position: "sticky",
                                 left: leftSn,
@@ -1457,17 +1548,12 @@ export default function MarksGridPage() {
                                 minWidth: STICKY.SN_W,
                               }}
                             >
-                              <Input
-                                className="h-8 text-center"
-                                value={edits.roll_no || ""}
-                                placeholder={String(rowIndex + 1)}
-                                onChange={(e) =>
-                                  setStudentField(eid, "roll_no", e.target.value)
-                                }
-                              />
+                              <div className="text-center font-medium">
+                                {edits.roll_no || s.roll_no || rowIndex + 1}
+                              </div>
                             </td>
                             <td
-                              className="p-2 bg-background border-r shadow-sm"
+                              className="px-0.5 py-0.5 bg-background border-r shadow-sm"
                               style={{
                                 position: "sticky",
                                 left: leftSymbol,
@@ -1476,16 +1562,12 @@ export default function MarksGridPage() {
                                 minWidth: STICKY.SYMBOL_W,
                               }}
                             >
-                              <Input
-                                className="h-8"
-                                value={edits.symbol_no || ""}
-                                onChange={(e) =>
-                                  setStudentField(eid, "symbol_no", e.target.value)
-                                }
-                              />
+                              <div className="font-mono text-sm">
+                                {edits.symbol_no || s.symbol_no || "—"}
+                              </div>
                             </td>
                             <td
-                              className="p-2 bg-background border-r shadow-sm"
+                              className="px-0.5 py-0.5 bg-background border-r shadow-sm"
                               style={{
                                 position: "sticky",
                                 left: leftName,
@@ -1494,13 +1576,9 @@ export default function MarksGridPage() {
                                 minWidth: STICKY.STUDENT_W,
                               }}
                             >
-                              <Input
-                                className="h-8"
-                                value={edits.full_name || ""}
-                                onChange={(e) =>
-                                  setStudentField(eid, "full_name", e.target.value)
-                                }
-                              />
+                              <div className="text-sm">
+                                {edits.full_name || s.full_name || "—"}
+                              </div>
                             </td>
 
                             {compulsoryCols.map((c) => {
@@ -1511,18 +1589,62 @@ export default function MarksGridPage() {
                                 full != null &&
                                 Number(v) > Number(full);
                               return (
-                                <td key={c.component_code} className="p-2 border-l">
+                                <td
+                                  key={c.component_code}
+                                  className="px-0.5 py-0.5 border-l"
+                                  style={{
+                                    width: SUBJECT_COL_W,
+                                    minWidth: SUBJECT_COL_W,
+                                    maxWidth: SUBJECT_COL_W,
+                                  }}
+                                >
                                   <Input
-                                    className="h-8"
+                                    className="h-[26px] px-0 text-[10px] text-center"
                                     value={v}
                                     placeholder={full != null ? `0-${full}` : "marks"}
+                                    ref={(el) => {
+                                      if (!el) return;
+                                      ledgerInputRefs.current[
+                                        ledgerCellKey(eid, c.component_code)
+                                      ] = el;
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        e.preventDefault();
+                                        const codes = getLedgerRowCodes(eid);
+                                        const idx = codes.findIndex(
+                                          (x) => String(x) === String(c.component_code)
+                                        );
+                                        const dir = e.shiftKey ? -1 : 1;
+
+                                        if (idx === -1) return;
+                                        const nextIdx = idx + dir;
+
+                                        if (nextIdx >= 0 && nextIdx < codes.length) {
+                                          focusLedgerCell(eid, codes[nextIdx]);
+                                          return;
+                                        }
+
+                                        const nextRowIndex = rowIndex + (dir > 0 ? 1 : -1);
+                                        if (nextRowIndex < 0 || nextRowIndex >= visibleStudents.length)
+                                          return;
+                                        const nextEid = visibleStudents[nextRowIndex].enrollment_id;
+                                        const nextCodes = getLedgerRowCodes(nextEid);
+                                        if (nextCodes.length === 0) return;
+                                        const targetCode =
+                                          dir > 0
+                                            ? nextCodes[0]
+                                            : nextCodes[nextCodes.length - 1];
+                                        focusLedgerCell(nextEid, targetCode);
+                                      }
+                                    }}
                                     onChange={(e) => {
                                       const val = safeNum(e.target.value);
                                       setMark(eid, c.component_code, val === "" ? "" : String(val));
                                     }}
                                   />
                                   {isInvalid ? (
-                                    <div className="text-[10px] text-destructive mt-1">
+                                    <div className="text-[8px] text-destructive mt-0.5">
                                       Invalid
                                     </div>
                                   ) : null}
@@ -1546,9 +1668,16 @@ export default function MarksGridPage() {
 
                               return (
                                 <Fragment key={g.name}>
-                                  <td className="p-2 border-l">
+                                  <td
+                                    className="px-0.5 py-0.5 border-l"
+                                    style={{
+                                      width: SUBJECT_COL_W,
+                                      minWidth: SUBJECT_COL_W,
+                                      maxWidth: SUBJECT_COL_W,
+                                    }}
+                                  >
                                     <Input
-                                      className="h-8"
+                                      className="h-5 px-0 text-[10px]"
                                       list={listId}
                                       value={optCode}
                                       placeholder="Code"
@@ -1567,17 +1696,65 @@ export default function MarksGridPage() {
                                       ))}
                                     </datalist>
                                     {meta ? (
-                                      <div className="text-[10px] text-muted-foreground mt-1">
+                                      <div className="text-[8px] text-muted-foreground mt-0.5">
                                         {meta.subject_name}
                                       </div>
                                     ) : null}
                                   </td>
-                                  <td className="p-2 border-l">
+                                  <td
+                                    className="px-0.5 py-0.5 border-l"
+                                    style={{
+                                      width: SUBJECT_COL_W,
+                                      minWidth: SUBJECT_COL_W,
+                                      maxWidth: SUBJECT_COL_W,
+                                    }}
+                                  >
                                     <Input
-                                      className="h-8"
+                                      className="h-[26px] px-0 text-[10px] text-center"
                                       disabled={!optCode}
                                       value={optMarks}
                                       placeholder={full != null ? `0-${full}` : "marks"}
+                                      ref={(el) => {
+                                        if (!el || !optCode) return;
+                                        ledgerInputRefs.current[
+                                          ledgerCellKey(eid, optCode)
+                                        ] = el;
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                          e.preventDefault();
+                                          if (!optCode) return;
+                                          const codes = getLedgerRowCodes(eid);
+                                          const idx = codes.findIndex(
+                                            (x) => String(x) === String(optCode)
+                                          );
+                                          const dir = e.shiftKey ? -1 : 1;
+
+                                          if (idx === -1) return;
+                                          const nextIdx = idx + dir;
+
+                                          if (nextIdx >= 0 && nextIdx < codes.length) {
+                                            focusLedgerCell(eid, codes[nextIdx]);
+                                            return;
+                                          }
+
+                                          const nextRowIndex = rowIndex + (dir > 0 ? 1 : -1);
+                                          if (
+                                            nextRowIndex < 0 ||
+                                            nextRowIndex >= visibleStudents.length
+                                          )
+                                            return;
+                                          const nextEid =
+                                            visibleStudents[nextRowIndex].enrollment_id;
+                                          const nextCodes = getLedgerRowCodes(nextEid);
+                                          if (nextCodes.length === 0) return;
+                                          const targetCode =
+                                            dir > 0
+                                              ? nextCodes[0]
+                                              : nextCodes[nextCodes.length - 1];
+                                          focusLedgerCell(nextEid, targetCode);
+                                        }
+                                      }}
                                       onChange={(e) => {
                                         const val = safeNum(e.target.value);
                                         if (!optCode) return;
@@ -1585,7 +1762,7 @@ export default function MarksGridPage() {
                                       }}
                                     />
                                     {isInvalid ? (
-                                      <div className="text-[10px] text-destructive mt-1">
+                                      <div className="text-[8px] text-destructive mt-0.5">
                                         Invalid
                                       </div>
                                     ) : null}
@@ -1594,12 +1771,12 @@ export default function MarksGridPage() {
                               );
                             })}
 
-                            <td className="p-2 text-center border-l font-medium">
+                            <td className="px-0.5 py-0.5 text-center border-l font-medium text-[10px]">
                               {total === "" ? "—" : total}
                             </td>
 
                             <td
-                              className="p-2 text-right bg-background border-l shadow-sm"
+                              className="px-0.5 py-0.5 text-right bg-background border-l shadow-sm"
                               style={{
                                 position: "sticky",
                                 right: 0,
@@ -1608,21 +1785,29 @@ export default function MarksGridPage() {
                                 minWidth: STICKY.ACTION_W,
                               }}
                             >
-                              <div className="flex justify-end gap-1 flex-wrap">
+                              <div className="flex justify-end gap-1 whitespace-nowrap">
                                 <Button
                                   size="sm"
-                                  className="h-8 px-2"
-                                  disabled={isLocked || saveOne.isPending}
-                                  onClick={() =>
-                                    saveOne.mutate({ enrollment_id: eid, student: s })
-                                  }
+                                  className="h-7 px-2"
+                                  disabled={saveOne.isPending}
+                                  onClick={() => {
+                                    if (!examId) {
+                                      toast.error("Select exam first");
+                                      return;
+                                    }
+                                    if (isLocked) {
+                                      toast.error("Exam is locked/published. Cannot save.");
+                                      return;
+                                    }
+                                    saveOne.mutate({ enrollment_id: eid, student: s });
+                                  }}
                                 >
                                   Save
                                 </Button>
 
                                 <Button
                                   size="sm"
-                                  className="h-8 px-2"
+                                  className="h-7 px-2"
                                   variant="outline"
                                   disabled={!examId || previewMutation.isPending}
                                   onClick={() => openPreview(s)}
@@ -1635,10 +1820,20 @@ export default function MarksGridPage() {
 
                                 <Button
                                   size="sm"
-                                  className="h-8 px-2"
+                                  className="h-7 px-2"
                                   variant="secondary"
-                                  disabled={!examId || isLocked || generateMutation.isPending}
-                                  onClick={() => generateOne(s)}
+                                  disabled={generateMutation.isPending}
+                                  onClick={() => {
+                                    if (!examId) {
+                                      toast.error("Select exam first");
+                                      return;
+                                    }
+                                    if (isLocked) {
+                                      toast.error("Exam is locked/published. Cannot generate.");
+                                      return;
+                                    }
+                                    generateOne(s);
+                                  }}
                                 >
                                   {generateMutation.isPending ? "Generating..." : "Generate"}
                                 </Button>
@@ -2055,14 +2250,18 @@ export default function MarksGridPage() {
                               return (
                                 <td
                                   key={c.code}
-                                  className="p-2 text-center border-l"
-                                  style={{ minWidth: "160px" }}
+                                  className="px-1 py-0.5 text-center border-l"
+                                  style={{ minWidth: "72px" }}
                                 >
                                   <Input
                                     disabled={isLocked}
                                     value={value}
                                     placeholder={full != null ? `0-${full}` : "marks"}
-                                    className={isInvalid ? "border-destructive" : ""}
+                                    className={
+                                      isInvalid
+                                        ? "border-destructive h-5 px-0 text-[10px] text-center"
+                                        : "h-5 px-0 text-[10px] text-center"
+                                    }
                                     ref={(el) => {
                                       if (!el) return;
                                       inputRefs.current[cellKey(eid, c.code)] = el;
@@ -2110,14 +2309,22 @@ export default function MarksGridPage() {
                               minWidth: STICKY.ACTION_W,
                             }}
                           >
-                            <div className="flex justify-end gap-1 flex-wrap">
+                            <div className="flex justify-end gap-1 whitespace-nowrap">
                               <Button
                                 size="sm"
                                 className="h-8 px-2"
-                                disabled={isLocked || saveOne.isPending}
-                                onClick={() =>
-                                  saveOne.mutate({ enrollment_id: eid, student: s })
-                                }
+                                disabled={saveOne.isPending}
+                                onClick={() => {
+                                  if (!examId) {
+                                    toast.error("Select exam first");
+                                    return;
+                                  }
+                                  if (isLocked) {
+                                    toast.error("Exam is locked/published. Cannot save.");
+                                    return;
+                                  }
+                                  saveOne.mutate({ enrollment_id: eid, student: s });
+                                }}
                               >
                                 Save
                               </Button>
@@ -2139,8 +2346,18 @@ export default function MarksGridPage() {
                                 size="sm"
                                 className="h-8 px-2"
                                 variant="secondary"
-                                disabled={!examId || isLocked || generateMutation.isPending}
-                                onClick={() => generateOne(s)}
+                                disabled={generateMutation.isPending}
+                                onClick={() => {
+                                  if (!examId) {
+                                    toast.error("Select exam first");
+                                    return;
+                                  }
+                                  if (isLocked) {
+                                    toast.error("Exam is locked/published. Cannot generate.");
+                                    return;
+                                  }
+                                  generateOne(s);
+                                }}
                               >
                                 {generateMutation.isPending ? "Generating..." : "Generate"}
                               </Button>

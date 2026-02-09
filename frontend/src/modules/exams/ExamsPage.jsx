@@ -146,6 +146,8 @@ export default function ExamsPage() {
     setPresetValues({
       full: p.full,
       optionalFull: p.optionalFull,
+      pass: p.pass,
+      optionalPass: p.optionalPass,
       enableIN: p.enableIN,
       inFull: p.inFull,
     });
@@ -180,6 +182,8 @@ export default function ExamsPage() {
           const full = toNumberOrEmpty(presetValues.full);
           const optionalFull = toNumberOrEmpty(presetValues.optionalFull);
           const inFull = toNumberOrEmpty(presetValues.inFull);
+          const pass = toNumberOrEmpty(presetValues.pass);
+          const optionalPass = toNumberOrEmpty(presetValues.optionalPass);
 
           if (full === "" || optionalFull === "") {
             throw new Error("Full marks and optional full marks are required to apply preset.");
@@ -191,6 +195,8 @@ export default function ExamsPage() {
           const applied = applyPresetToFlatComponents(flat, {
             full,
             optionalFull,
+            pass,
+            optionalPass,
             enableIN: !!presetValues.enableIN,
             inFull,
           });

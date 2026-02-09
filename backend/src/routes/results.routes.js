@@ -1,6 +1,6 @@
 const router = require("express").Router();
 const { requireAuth, requireRole } = require("../middlewares/auth");
-const { preview, generate, getSnapshot, publishExam } = require("../controllers/results.controller");
+const { preview, generate, getSnapshot, publishExam, unpublishExam } = require("../controllers/results.controller");
 
 // Preview (live)
 router.get("/:examId/enrollments/:enrollmentId/preview",
@@ -17,5 +17,9 @@ router.get("/:examId/enrollments/:enrollmentId",
 // Publish exam (Option A: publish generated snapshots only)
 router.post("/:examId/publish",
   requireAuth, requireRole("SUPER_ADMIN","ADMIN"), publishExam);
+
+// Unpublish exam (SUPER_ADMIN only)
+router.post("/:examId/unpublish",
+  requireAuth, requireRole("SUPER_ADMIN"), unpublishExam);
 
 module.exports = router;

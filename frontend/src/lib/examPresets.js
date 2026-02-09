@@ -3,7 +3,9 @@ export const EXAM_PRESETS = {
     key: "FIRST_TERMINAL",
     label: "First Terminal",
     full: 50,
-    optionalFull: 17.5,
+    optionalFull: 50,
+    pass: 17.5,
+    optionalPass: 17.5,
     enableIN: false,
     inFull: 0,
   },
@@ -28,6 +30,8 @@ export const EXAM_PRESETS = {
     label: "Custom",
     full: "",
     optionalFull: "",
+    pass: "",
+    optionalPass: "",
     enableIN: false,
     inFull: "",
   },
@@ -72,15 +76,22 @@ export function applyPresetToFlatComponents(list, preset) {
   const full = toNumberOrEmpty(preset.full);
   const optionalFull = toNumberOrEmpty(preset.optionalFull);
   const inFull = toNumberOrEmpty(preset.inFull);
+  const pass = toNumberOrEmpty(preset.pass);
+  const optionalPass = toNumberOrEmpty(preset.optionalPass);
   const enableIN = !!preset.enableIN;
 
   return (list || []).map((c) => {
     const isSpecial = isSpecialOptionalSubject(c.subject_name);
+    const passMarks =
+      c.component_type === "TH"
+        ? (isSpecial ? optionalPass : pass)
+        : "";
 
     if (c.component_type === "TH") {
       return {
         ...c,
         full_marks: isSpecial ? optionalFull : full,
+        pass_marks: passMarks === "" ? c.pass_marks : passMarks,
         is_enabled: true,
       };
     }

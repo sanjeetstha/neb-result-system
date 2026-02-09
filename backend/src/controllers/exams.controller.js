@@ -1,4 +1,5 @@
 const db = require("../db");
+const { verifyPassword } = require("../utils/crypto");
 
 // Create exam
 async function createExam(req, res) {
@@ -72,6 +73,97 @@ async function listExams(req, res) {
      ORDER BY e.id DESC`
   );
   res.json({ ok: true, exams: rows });
+}
+
+// Delete exam + related data (Admin/Super Admin)
+async function deleteExam(req, res) {
+  const examId = Number(req.params.examId);
+  if (!examId) return res.status(400).json({ ok: false, message: "Invalid exam id" });
+  const password = String(req.body?.password || "").trim();
+  if (!password) {
+    return res.status(400).json({ ok: false, message: "password required" });
+  }
+
+  const [[user]] = await db.query(
+    `SELECT password_hash FROM users WHERE id=? LIMIT 1`,
+    [req.user.uid]
+  );
+  if (!user?.password_hash) {
+    return res.status(401).json({ ok: false, message: "User not found" });
+  }
+  const ok = await verifyPassword(password, user.password_hash);
+  if (!ok) {
+    return res.status(401).json({ ok: false, message: "Invalid password" });
+  }
+
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [[exam]] = await conn.query(`SELECT id, name FROM exams WHERE id=? LIMIT 1`, [examId]);
+    if (!exam) {
+      await conn.rollback();
+      return res.status(404).json({ ok: false, message: "Exam not found" });
+    }
+
+    const [rReq] = await conn.query(
+      `DELETE FROM mark_change_requests WHERE exam_id=?`,
+      [examId]
+    );
+    const [rMarks] = await conn.query(`DELETE FROM marks WHERE exam_id=?`, [examId]);
+    const [rActs] = await conn.query(`DELETE FROM result_actions WHERE exam_id=?`, [examId]);
+    const [rSnaps] = await conn.query(`DELETE FROM result_snapshots WHERE exam_id=?`, [examId]);
+    const [rCfg] = await conn.query(
+      `DELETE FROM exam_component_configs WHERE exam_id=?`,
+      [examId]
+    );
+    const [rExam] = await conn.query(`DELETE FROM exams WHERE id=?`, [examId]);
+
+    await conn.query(
+      `INSERT INTO audit_logs (actor_user_id, action, entity, entity_id, ip_address, user_agent, meta_json)
+       VALUES (?,?,?,?,?,?,?)`,
+      [
+        req.user.uid,
+        "EXAM_DELETED",
+        "exams",
+        String(examId),
+        req.ip || null,
+        req.headers["user-agent"] || null,
+        JSON.stringify({
+          exam_id: examId,
+          exam_name: exam.name,
+          deleted: {
+            exam: rExam.affectedRows,
+            configs: rCfg.affectedRows,
+            marks: rMarks.affectedRows,
+            snapshots: rSnaps.affectedRows,
+            actions: rActs.affectedRows,
+            corrections: rReq.affectedRows,
+          },
+        }),
+      ]
+    );
+
+    await conn.commit();
+
+    res.json({
+      ok: true,
+      message: "Exam deleted",
+      deleted: {
+        exam: rExam.affectedRows,
+        configs: rCfg.affectedRows,
+        marks: rMarks.affectedRows,
+        snapshots: rSnaps.affectedRows,
+        actions: rActs.affectedRows,
+        corrections: rReq.affectedRows,
+      },
+    });
+  } catch (e) {
+    await conn.rollback();
+    res.status(500).json({ ok: false, message: e?.message || "Delete failed" });
+  } finally {
+    conn.release();
+  }
 }
 
 // Get components catalog + current config for one exam
@@ -230,4 +322,4 @@ async function setExamComponents(req, res) {
 }
 
 
-module.exports = { createExam, listExams, getExamComponents, setExamComponents };
+module.exports = { createExam, listExams, getExamComponents, setExamComponents, deleteExam };

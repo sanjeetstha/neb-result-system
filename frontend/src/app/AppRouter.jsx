@@ -151,9 +151,10 @@ export default function AppRouter() {
         <Route path="students" element={<StudentsPage />} />
 
         {/* Exams */}
-        <Route path="exams" element={<ExamsPage />} />
-        <Route path="exams/:examId/components" element={<ExamComponentsPage />} />
+        <Route path="exams" element={<ExamWorkflowPage />} />
         <Route path="exams/workflow" element={<ExamWorkflowPage />} />
+        <Route path="exams/manage" element={<ExamsPage />} />
+        <Route path="exams/:examId/components" element={<ExamComponentsPage />} />
 
         {/* Marks */}
         <Route path="marks" element={<MarksEntryPage />} />

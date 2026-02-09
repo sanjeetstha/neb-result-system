@@ -1,4 +1,5 @@
 const db = require("../db");
+const { verifyPassword } = require("../utils/crypto");
 
 async function createStudent(req, res) {
   const {
@@ -223,8 +224,245 @@ async function getStudentProfile(req, res) {
   });
 }
 
+// Delete a single student enrollment (Admin/Super Admin)
+async function deleteStudentEnrollment(req, res) {
+  const enrollmentId = Number(req.params.enrollmentId);
+  const password = String(req.body?.password || "").trim();
+
+  if (!enrollmentId) {
+    return res.status(400).json({ ok: false, message: "Invalid enrollment id" });
+  }
+  if (!password) {
+    return res.status(400).json({ ok: false, message: "password required" });
+  }
+
+  const [[user]] = await db.query(
+    `SELECT password_hash FROM users WHERE id=? LIMIT 1`,
+    [req.user.uid]
+  );
+  if (!user?.password_hash) {
+    return res.status(401).json({ ok: false, message: "User not found" });
+  }
+  const ok = await verifyPassword(password, user.password_hash);
+  if (!ok) {
+    return res.status(401).json({ ok: false, message: "Invalid password" });
+  }
+
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [[en]] = await conn.query(
+      `SELECT id, student_id FROM student_enrollments WHERE id=? LIMIT 1`,
+      [enrollmentId]
+    );
+    if (!en) {
+      await conn.rollback();
+      return res.status(404).json({ ok: false, message: "Enrollment not found" });
+    }
+
+    const [rOpts] = await conn.query(
+      `DELETE FROM student_optional_choices WHERE enrollment_id=?`,
+      [enrollmentId]
+    );
+    const [rMarks] = await conn.query(
+      `DELETE FROM marks WHERE enrollment_id=?`,
+      [enrollmentId]
+    );
+    const [rSnaps] = await conn.query(
+      `DELETE FROM result_snapshots WHERE enrollment_id=?`,
+      [enrollmentId]
+    );
+    const [rActs] = await conn.query(
+      `DELETE FROM result_actions WHERE enrollment_id=?`,
+      [enrollmentId]
+    );
+    const [rReq] = await conn.query(
+      `DELETE FROM mark_change_requests WHERE enrollment_id=?`,
+      [enrollmentId]
+    );
+    const [rEnroll] = await conn.query(
+      `DELETE FROM student_enrollments WHERE id=?`,
+      [enrollmentId]
+    );
+    const [rStudent] = await conn.query(
+      `DELETE s FROM students s
+       LEFT JOIN student_enrollments e ON e.student_id=s.id
+       WHERE e.id IS NULL AND s.id=?`,
+      [en.student_id]
+    );
+
+    await conn.query(
+      `INSERT INTO audit_logs (actor_user_id, action, entity, entity_id, ip_address, user_agent, meta_json)
+       VALUES (?,?,?,?,?,?,?)`,
+      [
+        req.user.uid,
+        "STUDENT_ENROLLMENT_DELETED",
+        "student_enrollments",
+        String(enrollmentId),
+        req.ip || null,
+        req.headers["user-agent"] || null,
+        JSON.stringify({
+          enrollment_id: enrollmentId,
+          student_id: en.student_id,
+          deleted: {
+            enrollments: rEnroll.affectedRows,
+            students: rStudent.affectedRows,
+            optional_choices: rOpts.affectedRows,
+            marks: rMarks.affectedRows,
+            snapshots: rSnaps.affectedRows,
+            actions: rActs.affectedRows,
+            corrections: rReq.affectedRows,
+          },
+        }),
+      ]
+    );
+
+    await conn.commit();
+
+    return res.json({
+      ok: true,
+      message: "Student deleted",
+      deleted: {
+        enrollments: rEnroll.affectedRows,
+        students: rStudent.affectedRows,
+        optional_choices: rOpts.affectedRows,
+        marks: rMarks.affectedRows,
+        snapshots: rSnaps.affectedRows,
+        actions: rActs.affectedRows,
+        corrections: rReq.affectedRows,
+      },
+    });
+  } catch (e) {
+    await conn.rollback();
+    return res.status(500).json({ ok: false, message: e?.message || "Delete failed" });
+  } finally {
+    conn.release();
+  }
+}
+// Delete a set of students by batch + class (Admin/Super Admin)
+async function deleteStudentsBulk(req, res) {
+  const batch_id = Number(req.body?.batch_id || req.query?.batch_id || 0);
+  const class_id = Number(req.body?.class_id || req.query?.class_id || 0);
+  const password = String(req.body?.password || "").trim();
+
+  if (!batch_id || !class_id) {
+    return res.status(400).json({ ok: false, message: "batch_id and class_id required" });
+  }
+  if (!password) {
+    return res.status(400).json({ ok: false, message: "password required" });
+  }
+
+  const [[user]] = await db.query(
+    `SELECT password_hash FROM users WHERE id=? LIMIT 1`,
+    [req.user.uid]
+  );
+  if (!user?.password_hash) {
+    return res.status(401).json({ ok: false, message: "User not found" });
+  }
+  const ok = await verifyPassword(password, user.password_hash);
+  if (!ok) {
+    return res.status(401).json({ ok: false, message: "Invalid password" });
+  }
+
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [enrollments] = await conn.query(
+      `SELECT id, student_id FROM student_enrollments WHERE batch_id=? AND class_id=?`,
+      [batch_id, class_id]
+    );
+
+    if (enrollments.length === 0) {
+      await conn.rollback();
+      return res.json({ ok: true, message: "No students found for batch/class", deleted: {} });
+    }
+
+    const enrollmentIds = enrollments.map((e) => e.id);
+    const studentIds = [...new Set(enrollments.map((e) => e.student_id))];
+
+    const [rOpts] = await conn.query(
+      `DELETE FROM student_optional_choices WHERE enrollment_id IN (?)`,
+      [enrollmentIds]
+    );
+    const [rMarks] = await conn.query(
+      `DELETE FROM marks WHERE enrollment_id IN (?)`,
+      [enrollmentIds]
+    );
+    const [rSnaps] = await conn.query(
+      `DELETE FROM result_snapshots WHERE enrollment_id IN (?)`,
+      [enrollmentIds]
+    );
+    const [rActs] = await conn.query(
+      `DELETE FROM result_actions WHERE enrollment_id IN (?)`,
+      [enrollmentIds]
+    );
+    const [rReq] = await conn.query(
+      `DELETE FROM mark_change_requests WHERE enrollment_id IN (?)`,
+      [enrollmentIds]
+    );
+    const [rEnroll] = await conn.query(
+      `DELETE FROM student_enrollments WHERE id IN (?)`,
+      [enrollmentIds]
+    );
+    const [rStudents] = await conn.query(
+      `DELETE s FROM students s
+       LEFT JOIN student_enrollments e ON e.student_id=s.id
+       WHERE e.id IS NULL AND s.id IN (?)`,
+      [studentIds]
+    );
+
+    await conn.query(
+      `INSERT INTO audit_logs (actor_user_id, action, entity, entity_id, ip_address, user_agent, meta_json)
+       VALUES (?,?,?,?,?,?,?)`,
+      [
+        req.user.uid,
+        "STUDENTS_BULK_DELETED",
+        "student_enrollments",
+        `${batch_id}:${class_id}`,
+        req.ip || null,
+        req.headers["user-agent"] || null,
+        JSON.stringify({
+          batch_id,
+          class_id,
+          deleted: {
+            enrollments: rEnroll.affectedRows,
+            students: rStudents.affectedRows,
+            optional_choices: rOpts.affectedRows,
+            marks: rMarks.affectedRows,
+            snapshots: rSnaps.affectedRows,
+            actions: rActs.affectedRows,
+            corrections: rReq.affectedRows,
+          },
+        }),
+      ]
+    );
+
+    await conn.commit();
+
+    return res.json({
+      ok: true,
+      message: "Students deleted",
+      deleted: {
+        enrollments: rEnroll.affectedRows,
+        students: rStudents.affectedRows,
+        optional_choices: rOpts.affectedRows,
+        marks: rMarks.affectedRows,
+        snapshots: rSnaps.affectedRows,
+        actions: rActs.affectedRows,
+        corrections: rReq.affectedRows,
+      },
+    });
+  } catch (e) {
+    await conn.rollback();
+    return res.status(500).json({ ok: false, message: e?.message || "Delete failed" });
+  } finally {
+    conn.release();
+  }
+}
 
 
 
 
-module.exports = { createStudent, listStudents, updateStudent, setOptionalChoices, getStudentProfile };
+module.exports = { createStudent, listStudents, updateStudent, setOptionalChoices, getStudentProfile, deleteStudentsBulk, deleteStudentEnrollment };

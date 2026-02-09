@@ -149,4 +149,36 @@ async function publishExam(req, res) {
   res.json({ ok: true, message: "Exam published and locked", published_count: r.affectedRows });
 }
 
-module.exports = { preview, generate, getSnapshot, publishExam };
+// Unpublish ALL results for the exam and unlock it (SUPER_ADMIN only)
+async function unpublishExam(req, res) {
+  const examId = Number(req.params.examId);
+
+  const [[exam]] = await db.query(
+    `SELECT id, is_locked, published_at FROM exams WHERE id=? LIMIT 1`,
+    [examId]
+  );
+  if (!exam) return res.status(404).json({ ok: false, message: "Exam not found" });
+  if (!exam.published_at && !exam.is_locked) {
+    return res.status(409).json({ ok: false, message: "Exam is not published/locked" });
+  }
+
+  await db.query(
+    `UPDATE result_snapshots SET published_at=NULL WHERE exam_id=?`,
+    [examId]
+  );
+
+  await db.query(
+    `UPDATE exams SET published_at=NULL, is_locked=0 WHERE id=?`,
+    [examId]
+  );
+
+  await db.query(
+    `INSERT INTO result_actions (exam_id, enrollment_id, action, done_by, done_at, note)
+     VALUES (?,NULL,'UNPUBLISH',?,NOW(),?)`,
+    [examId, req.user.uid, "Exam unpublished and unlocked"]
+  );
+
+  res.json({ ok: true, message: "Exam unpublished and unlocked" });
+}
+
+module.exports = { preview, generate, getSnapshot, publishExam, unpublishExam };

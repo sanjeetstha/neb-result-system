@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Link } from "react-router-dom";
 
 import { api } from "../../lib/api";
+import { useMe } from "../../lib/useMe";
 import {
   EXAM_PRESETS,
   applyPresetToFlatComponents,
@@ -16,6 +17,12 @@ import { Input } from "../../components/ui/input";
 import { Badge } from "../../components/ui/badge";
 import { Card, CardContent } from "../../components/ui/card";
 import { Separator } from "../../components/ui/separator";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "../../components/ui/dialog";
 
 function norm(v) {
   return String(v ?? "").trim();
@@ -44,6 +51,8 @@ function Select({ label, value, onChange, options, placeholder, disabled }) {
 
 export default function ExamWorkflowPage() {
   const qc = useQueryClient();
+  const meQ = useMe();
+  const me = meQ.data;
 
   const [examId, setExamId] = useState("");
   const [batchId, setBatchId] = useState("");
@@ -60,6 +69,8 @@ export default function ExamWorkflowPage() {
 
   const [generatingAll, setGeneratingAll] = useState(false);
   const [generateProgress, setGenerateProgress] = useState({ done: 0, total: 0 });
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
 
   // ----------------- Masters -----------------
   const examsQ = useQuery({
@@ -282,6 +293,8 @@ export default function ExamWorkflowPage() {
         const full = toNumberOrEmpty(preset.full);
         const optionalFull = toNumberOrEmpty(preset.optionalFull);
         const inFull = toNumberOrEmpty(preset.inFull);
+        const pass = toNumberOrEmpty(preset.pass);
+        const optionalPass = toNumberOrEmpty(preset.optionalPass);
 
         const componentsRes = await api.get(`/api/exams/${exam_id}/components`);
         const groups = componentsRes.data?.groups || [];
@@ -289,6 +302,8 @@ export default function ExamWorkflowPage() {
         const applied = applyPresetToFlatComponents(flat, {
           full,
           optionalFull,
+          pass,
+          optionalPass,
           enableIN: !!preset.enableIN,
           inFull,
         });
@@ -402,10 +417,29 @@ export default function ExamWorkflowPage() {
     },
   });
 
+  const deleteExamMutation = useMutation({
+    mutationFn: async (password) => {
+      const res = await api.delete(`/api/exams/${examId}`, {
+        data: { password },
+      });
+      return res.data;
+    },
+    onSuccess: async (data) => {
+      toast.success(data?.message || "Exam deleted");
+      setExamId("");
+      setDeleteOpen(false);
+      setDeletePassword("");
+      await qc.invalidateQueries({ queryKey: ["exams", "list"] });
+    },
+    onError: (e) => {
+      toast.error(e?.response?.data?.message || e.message || "Delete failed");
+    },
+  });
+
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">Exam Workflow (Simple)</h2>
+        <h2 className="text-lg font-semibold">Exam Manager</h2>
         <p className="text-sm text-muted-foreground">
           One flow: Create Exam → Import Excel → Generate All → Publish. No extra steps.
         </p>
@@ -442,6 +476,21 @@ export default function ExamWorkflowPage() {
               Existing exam auto-fills batch/class info.
             </div>
           </div>
+
+          {examId && (me?.role === "SUPER_ADMIN" || me?.role === "ADMIN") ? (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="destructive"
+                disabled={deleteExamMutation.isPending}
+                onClick={() => {
+                  setDeletePassword("");
+                  setDeleteOpen(true);
+                }}
+              >
+                {deleteExamMutation.isPending ? "Deleting..." : "Delete Exam"}
+              </Button>
+            </div>
+          ) : null}
 
           <Separator />
 
@@ -533,6 +582,37 @@ export default function ExamWorkflowPage() {
           ) : null}
         </CardContent>
       </Card>
+
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Exam Deletion</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="text-sm text-muted-foreground">
+              Enter your password to delete this exam and all related marks/results.
+            </div>
+            <Input
+              type="password"
+              placeholder="Password"
+              value={deletePassword}
+              onChange={(e) => setDeletePassword(e.target.value)}
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDeleteOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={!deletePassword || deleteExamMutation.isPending}
+                onClick={() => deleteExamMutation.mutate(deletePassword)}
+              >
+                {deleteExamMutation.isPending ? "Deleting..." : "Confirm Delete"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* STEP 2: IMPORT */}
       <Card>
@@ -636,6 +716,39 @@ export default function ExamWorkflowPage() {
             >
               {publishMutation.isPending ? "Publishing..." : "Publish Exam"}
             </Button>
+            {me?.role === "SUPER_ADMIN" ? (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (!examId) {
+                    toast.error("Select exam first");
+                    return;
+                  }
+                  if (!isPublished) {
+                    toast.error("Exam is not published");
+                    return;
+                  }
+                  const ok = window.confirm(
+                    "Unpublish this exam and unlock results? This will hide public results."
+                  );
+                  if (!ok) return;
+                  api
+                    .post(`/api/results/${examId}/unpublish`)
+                    .then((res) => {
+                      toast.success(res.data?.message || "Exam unpublished");
+                      qc.invalidateQueries({ queryKey: ["exams", "list"] });
+                    })
+                    .catch((e) => {
+                      toast.error(
+                        e?.response?.data?.message || e.message || "Unpublish failed"
+                      );
+                    });
+                }}
+                disabled={!examId}
+              >
+                Unpublish / Unlock
+              </Button>
+            ) : null}
             <Link className="text-xs text-muted-foreground underline" to="/reports">
               Open Reports
             </Link>
