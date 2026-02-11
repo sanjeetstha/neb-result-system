@@ -194,6 +194,15 @@ export default function SettingsPage() {
                   onChange={(e) => update({ tagline: e.target.value })}
                 />
               </div>
+
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium">Topbar Title (Optional Nepali)</label>
+                <Input
+                  value={form.topbar_title_np || ""}
+                  onChange={(e) => update({ topbar_title_np: e.target.value })}
+                  placeholder="Leave blank for default: Result Management System"
+                />
+              </div>
             </div>
 
             <Separator />
@@ -421,6 +430,29 @@ export default function SettingsPage() {
                   />
                 </div>
               </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Topbar Title Size</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="14"
+                    max="36"
+                    value={form.topbar_title_size || 20}
+                    onChange={(e) =>
+                      update({ topbar_title_size: Number(e.target.value || 20) })
+                    }
+                    className="w-full"
+                  />
+                  <Input
+                    className="w-20"
+                    value={form.topbar_title_size || 20}
+                    onChange={(e) =>
+                      update({ topbar_title_size: Number(e.target.value || 20) })
+                    }
+                  />
+                </div>
+              </div>
             </CardContent>
           </Card>
 
@@ -489,6 +521,28 @@ export default function SettingsPage() {
                     <div className="text-[11px] text-muted-foreground">
                       {form.notice_speed}s
                     </div>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs text-muted-foreground">Notice Text Size</label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="10"
+                      max="28"
+                      value={form.notice_text_size || 13}
+                      onChange={(e) =>
+                        update({ notice_text_size: Number(e.target.value || 13) })
+                      }
+                      className="w-full"
+                    />
+                    <Input
+                      className="w-20"
+                      value={form.notice_text_size || 13}
+                      onChange={(e) =>
+                        update({ notice_text_size: Number(e.target.value || 13) })
+                      }
+                    />
                   </div>
                 </div>
 

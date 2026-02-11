@@ -11,13 +11,13 @@ export default function MastersLayout() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">Masters</h2>
+        <h2 className="text-lg font-semibold">College Master</h2>
         <p className="text-sm text-muted-foreground">
           Configure campuses, academic years, faculties, and batches.
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-2 border-b pb-2">
+      <div className="flex flex-wrap gap-2 border-b pb-7">
         {tabs.map((t) => (
           <NavLink
             key={t.to}

@@ -64,7 +64,7 @@ export default function Sidebar({
   const ORG = {
     name: settings.org_name,
     tagline: settings.tagline,
-    logoSrc: settings.logo_data_url || settings.logo_small_data_url || null,
+    // logoSrc: settings.logo_data_url || settings.logo_small_data_url || null,
   };
 
   const isMobile = variant === "mobile";
@@ -89,6 +89,7 @@ export default function Sidebar({
         icon: ClipboardList,
         children: [
           { label: "Exam Manager", path: "/exams", icon: ClipboardList },
+          { label: "Subject Codes", path: "/academics/subject-codes", icon: ClipboardList },
           { label: "Marks Entry", path: "/marks", icon: PencilRuler },
           { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
         ],
@@ -132,6 +133,7 @@ export default function Sidebar({
         icon: ClipboardList,
         children: [
           { label: "Exam Manager", path: "/exams", icon: ClipboardList },
+          { label: "Subject Codes", path: "/academics/subject-codes", icon: ClipboardList },
           { label: "Marks Entry", path: "/marks", icon: PencilRuler },
           { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
         ],
@@ -230,7 +232,8 @@ export default function Sidebar({
     <div className={cn("px-4 pt-4 transition-all duration-300", isCollapsed && "px-2")}>
       {/* Product + org header with animation */}
       <div className={cn("flex items-center gap-3 transition-all duration-300", isCollapsed && "justify-center")}>
-        <div
+        {/* -------------------------------logo disabled here------------------------ */}
+        {/* <div
           className="rounded-xl border bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center overflow-hidden shadow-sm transition-all duration-300 hover:shadow-md hover:scale-105"
           style={{
             height: Math.max(32, Math.min(64, Number(settings.logo_size) || 44)),
@@ -249,7 +252,7 @@ export default function Sidebar({
                 .toUpperCase()}
             </span>
           )}
-        </div>
+        </div> */}
 
       {!isCollapsed ? (
         <div className="min-w-0 animate-fade-in">

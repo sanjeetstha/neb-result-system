@@ -1,4 +1,4 @@
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -11,8 +11,10 @@ import { getSidebarCollapsed, setSidebarCollapsed } from "../lib/uiState";
 
 export default function DashboardLayout() {
   const { data: me, isLoading, error } = useMe();
+  const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(getSidebarCollapsed());
+  const isDashboardHome = location.pathname === "/";
 
   useEffect(() => {
     if (!error) return;
@@ -90,14 +92,16 @@ export default function DashboardLayout() {
         </Sheet>
 
         {/* Main content area (ONLY this scrolls vertically) */}
-        <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 bg-gradient-to-br from-muted/30 via-background to-background">
-          <div className="rounded-2xl border bg-card/80 backdrop-blur p-4 md:p-6 shadow-sm">
-            {isLoading ? (
-              <div className="text-sm text-muted-foreground">Loading...</div>
-            ) : (
+        <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 bg-gradient-to-br from-slate-100/80 via-slate-50 to-slate-100/60">
+          {isLoading ? (
+            <div className="text-sm text-muted-foreground">Loading...</div>
+          ) : isDashboardHome ? (
+            <Outlet />
+          ) : (
+            <div className="rounded-2xl border bg-card/90 backdrop-blur p-4 md:p-6 shadow-sm">
               <Outlet />
-            )}
-          </div>
+            </div>
+          )}
         </main>
       </div>
     </div>

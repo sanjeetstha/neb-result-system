@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { Pencil, Trash2 } from "lucide-react";
 
 import { api } from "../../lib/api";
 import { usePagination } from "../../lib/usePagination";
@@ -106,6 +107,20 @@ export default function CampusesPage() {
     },
   });
 
+  const deleteCampus = useMutation({
+    mutationFn: async (id) => {
+      const res = await api.delete(`/api/masters/campuses/${id}`);
+      return res.data;
+    },
+    onSuccess: async () => {
+      toast.success("Campus deleted");
+      await qc.invalidateQueries({ queryKey: ["masters", "campuses"] });
+    },
+    onError: (err) => {
+      toast.error(err?.response?.data?.message || err.message || "Failed to delete campus");
+    },
+  });
+
   const rows = useMemo(() => {
     const arr = campusesQuery.data || [];
     return arr.map((x) => ({
@@ -132,6 +147,12 @@ export default function CampusesPage() {
       email: r.email || "",
     });
     setEditOpen(true);
+  };
+
+  const onDelete = (r) => {
+    const confirmed = window.confirm(`Delete campus "${r.name}"? This action cannot be undone.`);
+    if (!confirmed) return;
+    deleteCampus.mutate(r.id);
   };
 
   const renderForm = (onSave, savingLabel) => (
@@ -267,9 +288,27 @@ export default function CampusesPage() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <Button size="sm" variant="outline" onClick={() => openEdit(r)}>
-                          Edit
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            onClick={() => openEdit(r)}
+                            title="Edit campus"
+                            aria-label="Edit campus"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="destructive"
+                            onClick={() => onDelete(r)}
+                            title="Delete campus"
+                            aria-label="Delete campus"
+                            disabled={deleteCampus.isPending}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))

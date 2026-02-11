@@ -2,7 +2,7 @@ const router = require("express").Router();
 const { requireAuth, requireRole } = require("../middlewares/auth");
 const {
   listCampuses, createCampus,
-  updateCampus,
+  updateCampus, deleteCampus,
   listAcademicYears, createAcademicYear,
   updateAcademicYear,
   listFaculties, createFaculty,
@@ -13,13 +13,14 @@ const {
   updateBatch,
   listSections, createSection,
   updateSection,
-  getSubjectCatalog, getSubjectById
+  getSubjectCatalog, shiftOptionalSubjectGroup, getSubjectById
 } = require("../controllers/masters.controller");
 
 // Campuses
 router.get("/campuses", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), listCampuses);
 router.post("/campuses", requireAuth, requireRole("SUPER_ADMIN"), createCampus);
 router.put("/campuses/:id", requireAuth, requireRole("SUPER_ADMIN"), updateCampus);
+router.delete("/campuses/:id", requireAuth, requireRole("SUPER_ADMIN"), deleteCampus);
 
 // Academic years
 router.get("/academic-years", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), listAcademicYears);
@@ -48,6 +49,7 @@ router.post("/sections", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), creat
 router.put("/sections/:id", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), updateSection);
 
 router.get("/subject-catalog", requireAuth, requireRole("SUPER_ADMIN", "ADMIN", "TEACHER"), getSubjectCatalog);
+router.post("/subject-codes/shift", requireAuth, requireRole("SUPER_ADMIN"), shiftOptionalSubjectGroup);
 router.get("/subjects/:id", requireAuth, requireRole("SUPER_ADMIN", "ADMIN", "TEACHER"), getSubjectById);
 
 

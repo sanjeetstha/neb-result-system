@@ -43,6 +43,12 @@ export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed,
   const canManageApp = ["SUPER_ADMIN", "ADMIN"].includes(me?.role);
   const canQuickActions = ["SUPER_ADMIN", "ADMIN", "TEACHER"].includes(me?.role);
   const isActive = me?.is_active !== false;
+  const topbarTitle =
+    String(settings.topbar_title_np || "").trim() || "Result Management System";
+  const topbarTitleSize = Math.max(
+    14,
+    Math.min(36, Number(settings.topbar_title_size) || 20)
+  );
 
   const headerClass =
     settings.header_style === "solid"
@@ -59,13 +65,24 @@ export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed,
           background: settings.notice_bg_color,
           color: settings.notice_text_color,
         };
+  const noticeTextSize = Math.max(
+    10,
+    Math.min(28, Number(settings.notice_text_size) || 13)
+  );
 
   return (
     <header className={`sticky top-0 z-20 ${headerClass}`}>
       {settings.notice_enabled && settings.notice_text ? (
         <div className="border-b" style={noticeStyle}>
           <div className="overflow-hidden">
-            <div className="notice-marquee whitespace-nowrap py-2 text-xs font-semibold tracking-wide">
+            <div
+              className="notice-marquee whitespace-nowrap py-1 font-semibold tracking-wide"
+              style={{
+                fontFamily:
+                  "'Poppins', 'Noto Sans Devanagari', 'Mukta', 'Kalimati', sans-serif",
+                fontSize: `${noticeTextSize}px`,
+              }}
+            >
               {settings.notice_text}
             </div>
           </div>
@@ -95,7 +112,7 @@ export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed,
         >
           {collapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
         </Button>
-        <div className="flex items-center gap-2 font-semibold font-display">
+        <div className="flex min-w-0 items-center gap-2">
           {settings.logo_small_data_url || settings.logo_data_url ? (
             <img
               src={settings.logo_small_data_url || settings.logo_data_url}
@@ -107,7 +124,18 @@ export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed,
               }}
             />
           ) : null}
-          {settings.brand_name}
+          <div
+            className="truncate leading-tight text-foreground max-w-[44vw] md:max-w-none"
+            style={{
+              fontFamily:
+                "'Poppins', 'Noto Sans Devanagari', 'Mukta', 'Kalimati', sans-serif",
+              fontSize: `${topbarTitleSize}px`,
+              fontWeight: 600,
+            }}
+            title={topbarTitle}
+          >
+            {topbarTitle}
+          </div>
         </div>
 
         <div className="flex-1" />

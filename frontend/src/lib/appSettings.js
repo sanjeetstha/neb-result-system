@@ -4,6 +4,8 @@ const KEY = "app_settings";
 
 const DEFAULTS = {
   brand_name: "NEB Result System",
+  topbar_title_np: "",
+  topbar_title_size: 20,
   org_name: "Gaurishankar Multiple Campus",
   tagline: "NEB +2 Result Management",
   logo_data_url: "",
@@ -17,7 +19,8 @@ const DEFAULTS = {
   sidebar_color: "#0c2c55",
   header_style: "glass", // glass | solid
   notice_enabled: true,
-  notice_text: "Welcome to NEB Result System • Publish results with confidence •",
+  notice_text: "नेब नतिजा प्रणालीमा स्वागत छ • नतिजा प्रकाशन विश्वसनीय र छिटो बनाऔं •",
+  notice_text_size: 13,
   notice_speed: 28,
   notice_style: "gradient", // solid | gradient
   notice_bg_color: "#ededce",

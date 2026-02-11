@@ -43,6 +43,27 @@ async function updateCampus(req, res) {
   }
 }
 
+async function deleteCampus(req, res) {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ ok: false, message: "Invalid campus id" });
+
+  try {
+    const [result] = await db.query(`DELETE FROM campuses WHERE id=?`, [id]);
+    if (!result.affectedRows) {
+      return res.status(404).json({ ok: false, message: "Campus not found" });
+    }
+    res.json({ ok: true, message: "Campus deleted" });
+  } catch (e) {
+    if (String(e.message).toLowerCase().includes("foreign key")) {
+      return res.status(409).json({
+        ok: false,
+        message: "Campus is in use and cannot be deleted",
+      });
+    }
+    res.status(500).json({ ok: false, message: "Server error" });
+  }
+}
+
 async function listAcademicYears(req, res) {
   const [rows] = await db.query(
     `SELECT ay.*, b.name AS batch_name, b.year_bs AS batch_year_bs
@@ -339,6 +360,126 @@ async function getSubjectCatalog(req, res) {
   res.json({ ok: true, academic_year_id, class_id, groups: groupsOut });
 }
 
+async function shiftOptionalSubjectGroup(req, res) {
+  const academic_year_id = Number(req.body?.academic_year_id);
+  const class_id = Number(req.body?.class_id);
+  const subject_id = Number(req.body?.subject_id);
+  const to_group_name = String(req.body?.to_group_name || "").trim();
+
+  if (!academic_year_id || !class_id || !subject_id || !to_group_name) {
+    return res.status(400).json({
+      ok: false,
+      message: "academic_year_id, class_id, subject_id, to_group_name required",
+    });
+  }
+  if (!to_group_name.toLowerCase().startsWith("opt")) {
+    return res.status(400).json({
+      ok: false,
+      message: "Target group must be an optional group (name starts with Opt)",
+    });
+  }
+
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [[targetGroup]] = await conn.query(
+      `SELECT id, name
+       FROM catalog_groups
+       WHERE academic_year_id <=> ? AND class_id <=> ? AND faculty_id IS NULL AND name=?
+       LIMIT 1`,
+      [academic_year_id, class_id, to_group_name]
+    );
+    if (!targetGroup) {
+      await conn.rollback();
+      return res.status(404).json({ ok: false, message: "Target optional group not found" });
+    }
+
+    const [currentRows] = await conn.query(
+      `SELECT cgs.catalog_group_id, cg.name
+       FROM catalog_group_subjects cgs
+       JOIN catalog_groups cg ON cg.id=cgs.catalog_group_id
+       WHERE cg.academic_year_id <=> ?
+         AND cg.class_id <=> ?
+         AND cg.faculty_id IS NULL
+         AND cgs.subject_id=?
+         AND LOWER(cg.name) LIKE 'opt%'
+       ORDER BY cg.sort_order ASC, cgs.sort_order ASC`,
+      [academic_year_id, class_id, subject_id]
+    );
+
+    if (!currentRows.length) {
+      await conn.rollback();
+      return res.status(404).json({
+        ok: false,
+        message: "Subject is not currently assigned to any optional group",
+      });
+    }
+
+    if (currentRows.some((r) => Number(r.catalog_group_id) === Number(targetGroup.id))) {
+      await conn.rollback();
+      return res.json({
+        ok: true,
+        message: "Subject already in target optional group",
+      });
+    }
+
+    const currentGroupNames = [...new Set(currentRows.map((r) => r.name).filter(Boolean))];
+    const currentGroupIds = [...new Set(currentRows.map((r) => Number(r.catalog_group_id)))];
+
+    await conn.query(
+      `DELETE FROM catalog_group_subjects
+       WHERE subject_id=? AND catalog_group_id IN (?)`,
+      [subject_id, currentGroupIds]
+    );
+
+    const [[maxSortRow]] = await conn.query(
+      `SELECT COALESCE(MAX(sort_order), 0) AS max_sort
+       FROM catalog_group_subjects
+       WHERE catalog_group_id=?`,
+      [targetGroup.id]
+    );
+    const nextSort = Number(maxSortRow?.max_sort || 0) + 1;
+
+    await conn.query(
+      `INSERT INTO catalog_group_subjects (catalog_group_id, subject_id, sort_order)
+       VALUES (?,?,?)`,
+      [targetGroup.id, subject_id, nextSort]
+    );
+
+    await conn.query(
+      `UPDATE student_optional_choices soc
+       JOIN student_enrollments e ON e.id=soc.enrollment_id
+       SET soc.group_name=?
+       WHERE soc.subject_id=?
+         AND e.academic_year_id <=> ?
+         AND e.class_id <=> ?
+         AND soc.group_name IN (?)`,
+      [targetGroup.name, subject_id, academic_year_id, class_id, currentGroupNames]
+    );
+
+    await conn.commit();
+
+    res.json({
+      ok: true,
+      message: "Subject moved to target optional group",
+      moved: {
+        subject_id,
+        from_groups: currentGroupNames,
+        to_group: targetGroup.name,
+      },
+    });
+  } catch (e) {
+    await conn.rollback();
+    if (String(e.message).toLowerCase().includes("duplicate")) {
+      return res.status(409).json({ ok: false, message: "Subject already mapped in target group" });
+    }
+    res.status(500).json({ ok: false, message: "Server error" });
+  } finally {
+    conn.release();
+  }
+}
+
 async function getSubjectById(req, res) {
   const id = Number(req.params.id);
   const [[subject]] = await db.query(`SELECT id,name,is_active FROM subjects WHERE id=? LIMIT 1`, [id]);
@@ -362,6 +503,7 @@ module.exports = {
   listCampuses,
   createCampus,
   updateCampus,
+  deleteCampus,
   listAcademicYears,
   createAcademicYear,
   updateAcademicYear,
@@ -377,5 +519,6 @@ module.exports = {
   createSection,
   updateSection,
   getSubjectCatalog,
+  shiftOptionalSubjectGroup,
   getSubjectById,
 };

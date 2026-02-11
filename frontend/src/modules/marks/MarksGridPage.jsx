@@ -3,11 +3,13 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { api } from "../../lib/api";
+import { usePagination } from "../../lib/usePagination";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Badge } from "../../components/ui/badge";
 import { Card, CardContent } from "../../components/ui/card";
 import { Separator } from "../../components/ui/separator";
+import PaginationBar from "../../components/ui/pagination-bar";
 
 import {
   Dialog,
@@ -609,6 +611,10 @@ export default function MarksGridPage() {
     });
   }, [students, studentQuery]);
 
+  const pager = usePagination(visibleStudents, 20);
+  const pagedStudents = pager.pageItems;
+  const pageStartIndex = (pager.page - 1) * pager.pageSize;
+
   // ---------------- DIRTY CHECK ----------------
   const isRowDirty = (enrollment_id) => {
     const base = baselineRef.current?.[enrollment_id] || {};
@@ -667,7 +673,7 @@ export default function MarksGridPage() {
   };
 
   const moveFocus = (rowIndex, colIndex, dir) => {
-    const totalRows = visibleStudents.length;
+    const totalRows = pagedStudents.length;
     const totalCols = visibleColumns.length;
     if (totalRows === 0 || totalCols === 0) return;
 
@@ -685,7 +691,7 @@ export default function MarksGridPage() {
 
       if (r < 0 || r >= totalRows) return;
 
-      const enrollmentId = visibleStudents[r].enrollment_id;
+      const enrollmentId = pagedStudents[r].enrollment_id;
       const code = visibleColumns[c].code;
       focusCell(enrollmentId, code);
       return;
@@ -1527,7 +1533,7 @@ export default function MarksGridPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {visibleStudents.map((s, rowIndex) => {
+                      {pagedStudents.map((s, rowIndex) => {
                         const eid = s.enrollment_id;
                         const row = marksByEnrollment[eid] || {};
                         const edits = studentEdits[eid] || {};
@@ -1549,7 +1555,7 @@ export default function MarksGridPage() {
                               }}
                             >
                               <div className="text-center font-medium">
-                                {edits.roll_no || s.roll_no || rowIndex + 1}
+                                {edits.roll_no || s.roll_no || pageStartIndex + rowIndex + 1}
                               </div>
                             </td>
                             <td
@@ -1626,9 +1632,9 @@ export default function MarksGridPage() {
                                         }
 
                                         const nextRowIndex = rowIndex + (dir > 0 ? 1 : -1);
-                                        if (nextRowIndex < 0 || nextRowIndex >= visibleStudents.length)
+                                        if (nextRowIndex < 0 || nextRowIndex >= pagedStudents.length)
                                           return;
-                                        const nextEid = visibleStudents[nextRowIndex].enrollment_id;
+                                        const nextEid = pagedStudents[nextRowIndex].enrollment_id;
                                         const nextCodes = getLedgerRowCodes(nextEid);
                                         if (nextCodes.length === 0) return;
                                         const targetCode =
@@ -1741,11 +1747,11 @@ export default function MarksGridPage() {
                                           const nextRowIndex = rowIndex + (dir > 0 ? 1 : -1);
                                           if (
                                             nextRowIndex < 0 ||
-                                            nextRowIndex >= visibleStudents.length
+                                            nextRowIndex >= pagedStudents.length
                                           )
                                             return;
                                           const nextEid =
-                                            visibleStudents[nextRowIndex].enrollment_id;
+                                            pagedStudents[nextRowIndex].enrollment_id;
                                           const nextCodes = getLedgerRowCodes(nextEid);
                                           if (nextCodes.length === 0) return;
                                           const targetCode =
@@ -1963,7 +1969,7 @@ export default function MarksGridPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {visibleStudents.map((s, rowIndex) => {
+                      {pagedStudents.map((s, rowIndex) => {
                         const eid = s.enrollment_id;
                         const edits = studentEdits[eid] || {};
                         const gradeRow = gradesByEnrollment[eid] || {};
@@ -1988,7 +1994,7 @@ export default function MarksGridPage() {
                               }}
                             >
                               <div className="text-center font-medium">
-                                {edits.roll_no || s.roll_no || rowIndex + 1}
+                                {edits.roll_no || s.roll_no || pageStartIndex + rowIndex + 1}
                               </div>
                             </td>
                             <td
@@ -2190,7 +2196,7 @@ export default function MarksGridPage() {
                   </thead>
 
                   <tbody>
-                    {visibleStudents.map((s) => {
+                    {pagedStudents.map((s) => {
                       const eid = s.enrollment_id;
                       const rowMarks = marksByEnrollment[eid] || {};
                       const dirty = isRowDirty(eid);
@@ -2270,7 +2276,7 @@ export default function MarksGridPage() {
                                       if (e.key === "Enter") {
                                         e.preventDefault();
                                         const dir = e.shiftKey ? -1 : 1;
-                                        const rIndex = visibleStudents.findIndex(
+                                        const rIndex = pagedStudents.findIndex(
                                           (x) => x.enrollment_id === eid
                                         );
                                         const cIndex = visibleColumns.findIndex(
@@ -2377,6 +2383,23 @@ export default function MarksGridPage() {
               </div>
             </div>
           )}
+
+          {examId &&
+          batchId &&
+          !studentsQ.isLoading &&
+          !loadingLedgers &&
+          visibleStudents.length > 0 ? (
+            <div className="mt-3">
+              <PaginationBar
+                page={pager.page}
+                totalPages={pager.totalPages}
+                onPageChange={pager.setPage}
+                pageSize={pager.pageSize}
+                onPageSizeChange={pager.setPageSize}
+                totalItems={visibleStudents.length}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
 
