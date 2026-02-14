@@ -5,6 +5,11 @@ const { execFile } = require("child_process");
 
 const PDFDocument = require("pdfkit");
 const db = require("../db");
+const { previewResult } = require("../services/result.service");
+const {
+  getCompulsorySubjectIds,
+  getSelectedOptionalSubjectIds,
+} = require("../services/subjectSelection.service");
 
 function norm(s) {
   return String(s ?? "").trim();
@@ -30,6 +35,18 @@ function padCode(code) {
   if (!s) return "";
   if (s.length >= 4) return s;
   return s.padStart(4, "0");
+}
+
+function canAccessUnpublishedResults(user) {
+  const role = String(user?.role || "").toUpperCase();
+  return [
+    "SUPER_ADMIN",
+    "ADMIN",
+    "TEACHER",
+    "EXAM_HEAD",
+    "CAMPUS_CHIEF",
+    "ASSISTANT_CAMPUS_CHIEF",
+  ].includes(role);
 }
 
 /**
@@ -71,18 +88,26 @@ function pipePdfToResponse({ res, doc }) {
 }
 
 // --------------- DB fetch helpers (async) ----------------
-async function fetchPublishedSnapshot({ exam_id, symbol_no, dob }) {
-  const [rows] = await db.query(
+async function fetchSnapshot({ exam_id, symbol_no, dob, publishedOnly = true }) {
+  let sql =
     `SELECT rs.enrollment_id, rs.payload_json, rs.overall_gpa, rs.final_grade, rs.result_status, rs.published_at,
             s.full_name, s.symbol_no, s.regd_no, s.roll_no, s.dob
      FROM result_snapshots rs
      JOIN student_enrollments e ON e.id=rs.enrollment_id
      JOIN students s ON s.id=e.student_id
-     WHERE rs.exam_id=? AND rs.published_at IS NOT NULL
-       AND s.symbol_no=? AND DATE(s.dob)=DATE(?)
-     LIMIT 1`,
-    [exam_id, symbol_no, dob]
-  );
+     WHERE rs.exam_id=?
+       AND s.symbol_no=?`;
+  const params = [exam_id, symbol_no];
+  if (publishedOnly) {
+    sql += ` AND rs.published_at IS NOT NULL`;
+  }
+  if (dob) {
+    sql += ` AND DATE(s.dob)=DATE(?)`;
+    params.push(dob);
+  }
+  sql += ` ORDER BY rs.published_at IS NOT NULL DESC, rs.generated_at DESC LIMIT 1`;
+
+  const [rows] = await db.query(sql, params);
 
   if (!rows.length) return null;
 
@@ -95,6 +120,116 @@ async function fetchPublishedSnapshot({ exam_id, symbol_no, dob }) {
   }
 
   return { row: r, payload };
+}
+
+async function fetchLiveResultBySymbol({ exam_id, symbol_no, dob }) {
+  const [[exam]] = await db.query(
+    `SELECT id, campus_id, academic_year_id, class_id, faculty_id
+     FROM exams
+     WHERE id=? LIMIT 1`,
+    [exam_id]
+  );
+  if (!exam) return null;
+
+  let where =
+    `e.campus_id=? AND e.academic_year_id=? AND e.class_id=? AND s.symbol_no=?`;
+  const params = [exam.campus_id, exam.academic_year_id, exam.class_id, symbol_no];
+
+  if (exam.faculty_id) {
+    where += ` AND e.faculty_id=?`;
+    params.push(exam.faculty_id);
+  }
+  if (dob) {
+    where += ` AND DATE(s.dob)=DATE(?)`;
+    params.push(dob);
+  }
+
+  const [rows] = await db.query(
+    `SELECT e.id AS enrollment_id, s.full_name, s.symbol_no, s.regd_no, s.roll_no, s.dob
+     FROM student_enrollments e
+     JOIN students s ON s.id=e.student_id
+     WHERE ${where}
+     ORDER BY
+       CASE WHEN s.roll_no IS NULL OR s.roll_no='' THEN 1 ELSE 0 END ASC,
+       s.roll_no ASC,
+       s.full_name ASC
+     LIMIT 1`,
+    params
+  );
+  if (!rows.length) return null;
+
+  const r = rows[0];
+  const payload = await previewResult({
+    examId: exam_id,
+    enrollmentId: Number(r.enrollment_id),
+  });
+
+  return {
+    row: {
+      enrollment_id: r.enrollment_id,
+      overall_gpa: payload?.overall_gpa ?? 0,
+      final_grade: payload?.final_grade ?? "",
+      result_status: payload?.result_status ?? "",
+      published_at: null,
+      full_name: r.full_name,
+      symbol_no: r.symbol_no,
+      regd_no: r.regd_no,
+      roll_no: r.roll_no,
+      dob: r.dob,
+    },
+    payload,
+    source: "LIVE",
+  };
+}
+
+async function listMarksheetStudents(req, res) {
+  try {
+    const exam_id = Number(req.query.exam_id);
+    if (!exam_id) {
+      return res.status(400).json({ ok: false, message: "exam_id required" });
+    }
+
+    const [[exam]] = await db.query(
+      `SELECT id, campus_id, academic_year_id, class_id, faculty_id
+       FROM exams
+       WHERE id=? LIMIT 1`,
+      [exam_id]
+    );
+    if (!exam) {
+      return res.status(404).json({ ok: false, message: "Exam not found" });
+    }
+
+    let where = `e.campus_id=? AND e.academic_year_id=? AND e.class_id=?`;
+    const params = [exam.campus_id, exam.academic_year_id, exam.class_id];
+    if (exam.faculty_id) {
+      where += ` AND e.faculty_id=?`;
+      params.push(exam.faculty_id);
+    }
+
+    const [rows] = await db.query(
+      `SELECT e.id AS enrollment_id, s.full_name, s.symbol_no, s.regd_no, s.roll_no, s.dob,
+              CASE WHEN mx.enrollment_id IS NULL THEN 0 ELSE 1 END AS has_marks,
+              CASE WHEN rs.enrollment_id IS NULL THEN 0 ELSE 1 END AS has_snapshot,
+              CASE WHEN rs.published_at IS NULL THEN 0 ELSE 1 END AS is_published
+       FROM student_enrollments e
+       JOIN students s ON s.id=e.student_id
+       LEFT JOIN (
+         SELECT enrollment_id FROM marks WHERE exam_id=? GROUP BY enrollment_id
+       ) mx ON mx.enrollment_id=e.id
+       LEFT JOIN result_snapshots rs
+         ON rs.exam_id=? AND rs.enrollment_id=e.id
+       WHERE ${where}
+       ORDER BY
+         CASE WHEN s.roll_no IS NULL OR s.roll_no='' THEN 1 ELSE 0 END ASC,
+         s.roll_no ASC,
+         s.full_name ASC`,
+      [exam_id, exam_id, ...params]
+    );
+
+    return res.json({ ok: true, students: rows });
+  } catch (err) {
+    return res.status(500).json({ ok: false, message: err.message || "Server error" });
+  }
 }
 
 async function fetchExamHeader(exam_id) {
@@ -192,29 +327,10 @@ async function buildMarksheetComponentRows(exam_id, enrollment_id, rules) {
   );
   if (!enroll) throw new Error("Enrollment not found");
 
-  // subject ids = compulsory + chosen optionals
-  const [[cg]] = await db.query(
-    `SELECT id FROM catalog_groups
-     WHERE academic_year_id <=> ? AND class_id <=> ? AND faculty_id IS NULL AND name='COMPULSORY'
-     LIMIT 1`,
-    [enroll.academic_year_id, enroll.class_id]
-  );
-
-  let subjectIds = [];
-  if (cg) {
-    const [cs] = await db.query(
-      `SELECT subject_id FROM catalog_group_subjects WHERE catalog_group_id=?`,
-      [cg.id]
-    );
-    subjectIds.push(...cs.map((x) => x.subject_id));
-  }
-
-  const [ops] = await db.query(
-    `SELECT subject_id FROM student_optional_choices WHERE enrollment_id=?`,
-    [enrollment_id]
-  );
-  subjectIds.push(...ops.map((x) => x.subject_id));
-  subjectIds = [...new Set(subjectIds)];
+  // subject ids = compulsory + chosen optionals (capped to 3 optionals)
+  const compulsoryIds = await getCompulsorySubjectIds(enroll.academic_year_id, enroll.class_id);
+  const optionalIds = await getSelectedOptionalSubjectIds(enrollment_id);
+  const subjectIds = [...new Set([...compulsoryIds, ...optionalIds])];
 
   // components for these subjects
   const [components] = await db.query(
@@ -490,12 +606,30 @@ async function marksheetPdf(req, res) {
     const symbol_no = norm(req.query.symbol_no);
     const dob = norm(req.query.dob);
 
-    if (!exam_id || !symbol_no || !dob) {
-      return res.status(400).json({ ok: false, message: "exam_id, symbol_no, dob required" });
+    if (!exam_id || !symbol_no) {
+      return res.status(400).json({ ok: false, message: "exam_id and symbol_no required" });
     }
 
-    const found = await fetchPublishedSnapshot({ exam_id, symbol_no, dob });
-    if (!found) return res.status(404).json({ ok: false, message: "Published result not found" });
+    const allowUnpublished = canAccessUnpublishedResults(req.user);
+
+    let found = await fetchSnapshot({
+      exam_id,
+      symbol_no,
+      dob,
+      publishedOnly: !allowUnpublished,
+    });
+    // Admin workflow fallback: if snapshot not generated yet, compute from saved marks.
+    if (!found && allowUnpublished) {
+      found = await fetchLiveResultBySymbol({ exam_id, symbol_no, dob });
+    }
+    if (!found) {
+      return res.status(404).json({
+        ok: false,
+        message: dob
+          ? "Result not found (check exam, symbol no, and DOB)"
+          : "Result not found (check exam and symbol no)",
+      });
+    }
 
     const ex = await fetchExamHeader(exam_id);
     const subjects = found.payload?.subjects || [];
@@ -542,7 +676,7 @@ async function marksheetJpg(req, res) {
       return res.status(400).json({ ok: false, message: "exam_id, symbol_no, dob required" });
     }
 
-    const found = await fetchPublishedSnapshot({ exam_id, symbol_no, dob });
+    const found = await fetchSnapshot({ exam_id, symbol_no, dob, publishedOnly: true });
     if (!found) return res.status(404).json({ ok: false, message: "Published result not found" });
 
     const ex = await fetchExamHeader(exam_id);
@@ -855,4 +989,10 @@ async function transcriptJpg(req, res) {
   }
 }
 
-module.exports = { marksheetPdf, marksheetJpg, transcriptPdf, transcriptJpg };
+module.exports = {
+  listMarksheetStudents,
+  marksheetPdf,
+  marksheetJpg,
+  transcriptPdf,
+  transcriptJpg,
+};

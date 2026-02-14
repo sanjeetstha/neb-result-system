@@ -1,20 +1,41 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FileText, HelpCircle, ShieldCheck } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 
 import ResultsSearchPage from "../results/ResultsSearchPage";
 import { Card, CardContent } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
 import { Separator } from "../../components/ui/separator";
-import { api } from "../../lib/api";
+import { Button } from "../../components/ui/button";
+import { publicApi } from "../../lib/publicApi";
 import { useAppSettings } from "../../lib/appSettings";
+import { clearPublicToken, getPublicSessionPayload } from "../../lib/publicAuth";
+import { isAuthed } from "../../lib/auth";
 
 export default function PublicResultsPage() {
   const settings = useAppSettings();
+  const nav = useNavigate();
+
+  const publicPayload = getPublicSessionPayload();
+  const expiresAt = publicPayload?.exp
+    ? new Date(Number(publicPayload.exp) * 1000)
+    : null;
+
+  useEffect(() => {
+    const onExpired = () => {
+      toast.error("Public session expired. Please request OTP again.");
+      nav("/public", { replace: true });
+    };
+    window.addEventListener("public-session-expired", onExpired);
+    return () => window.removeEventListener("public-session-expired", onExpired);
+  }, [nav]);
+
   const examsQ = useQuery({
     queryKey: ["public", "exams", "portal"],
     queryFn: async () => {
-      const res = await api.get("/api/public/exams");
+      const res = await publicApi.get("/api/public/exams");
       const data = res.data?.exams ?? res.data?.data ?? res.data ?? [];
       return Array.isArray(data) ? data : [];
     },
@@ -37,8 +58,8 @@ export default function PublicResultsPage() {
                 {settings.org_name || "NEB Result System"}
               </h1>
               <p className="mt-2 text-sm text-muted-foreground max-w-lg">
-                Search results by exam, symbol number, and date of birth. Download the
-                official marksheet and transcript once results are published.
+                Search published results by exam, symbol number, and date of birth.
+                No internal modules are available in this public session.
               </p>
 
               <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -51,15 +72,19 @@ export default function PublicResultsPage() {
                   <div className="text-lg font-semibold">Marksheet + Transcript</div>
                 </div>
                 <div className="rounded-lg border bg-white/70 p-3">
-                  <div className="text-xs text-muted-foreground">Support</div>
-                  <div className="text-lg font-semibold">Help Desk</div>
+                  <div className="text-xs text-muted-foreground">Session</div>
+                  <div className="text-lg font-semibold">
+                    {expiresAt
+                      ? `Until ${expiresAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                      : "Protected"}
+                  </div>
                 </div>
               </div>
 
               <div className="mt-5 flex flex-wrap gap-2">
                 <Badge variant="outline">Fast Search</Badge>
                 <Badge variant="outline">Official PDF</Badge>
-                <Badge variant="outline">Verified Results</Badge>
+                <Badge variant="outline">Published Only</Badge>
               </div>
             </div>
 
@@ -78,8 +103,7 @@ export default function PublicResultsPage() {
               Result Verification
             </div>
             <p className="text-sm text-muted-foreground">
-              Results shown here are official. Download the marksheet PDF to verify
-              details or contact your campus administration for support.
+              Results shown here are official and limited to published exam data.
             </p>
           </CardContent>
         </Card>
@@ -91,8 +115,7 @@ export default function PublicResultsPage() {
               Download Options
             </div>
             <p className="text-sm text-muted-foreground">
-              After search, download the official marksheet and transcript for
-              scholarship or application purposes.
+              Open marksheet and transcript in browser, then print as needed.
             </p>
           </CardContent>
         </Card>
@@ -104,8 +127,7 @@ export default function PublicResultsPage() {
               Need Help?
             </div>
             <p className="text-sm text-muted-foreground">
-              If your result is missing, check symbol number and DOB. For help,
-              contact the exam section at your campus.
+              Contact your campus exam section if result details are missing.
             </p>
           </CardContent>
         </Card>
@@ -120,7 +142,22 @@ export default function PublicResultsPage() {
                 Only published exams are visible in the public portal.
               </div>
             </div>
-            <Badge variant="secondary">{examList.length} available</Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary">{examList.length} available</Badge>
+              {!isAuthed() && publicPayload ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    clearPublicToken();
+                    nav("/public", { replace: true });
+                  }}
+                >
+                  End Session
+                </Button>
+              ) : null}
+            </div>
           </div>
 
           <Separator />

@@ -5,10 +5,34 @@ const { createStudent, listStudents, updateStudent, setOptionalChoices, getStude
 
 
 router.post("/", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), createStudent);
-router.get("/", requireAuth, requireRole("SUPER_ADMIN", "ADMIN", "TEACHER"), listStudents);
+router.get(
+  "/",
+  requireAuth,
+  requireRole(
+    "SUPER_ADMIN",
+    "ADMIN",
+    "TEACHER",
+    "EXAM_HEAD",
+    "CAMPUS_CHIEF",
+    "ASSISTANT_CAMPUS_CHIEF"
+  ),
+  listStudents
+);
 router.put("/:studentId", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), updateStudent);
 router.post("/:enrollmentId/optional-choices", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), setOptionalChoices);
-router.get("/:enrollmentId/profile", requireAuth, requireRole("SUPER_ADMIN", "ADMIN", "TEACHER"), getStudentProfile);
+router.get(
+  "/:enrollmentId/profile",
+  requireAuth,
+  requireRole(
+    "SUPER_ADMIN",
+    "ADMIN",
+    "TEACHER",
+    "EXAM_HEAD",
+    "CAMPUS_CHIEF",
+    "ASSISTANT_CAMPUS_CHIEF"
+  ),
+  getStudentProfile
+);
 router.delete("/bulk", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), deleteStudentsBulk);
 router.delete("/enrollments/:enrollmentId", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), deleteStudentEnrollment);
 

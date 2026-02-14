@@ -19,6 +19,7 @@ const exportRoutes = require("./routes/export.routes");
 const inviteRoutes = require("./routes/invites.routes");
 const usersRoutes = require("./routes/users.routes");
 const smsRoutes = require("./routes/sms.routes");
+const notificationsRoutes = require("./routes/notifications.routes");
 
 app.use(helmet());
 app.use(cors());
@@ -38,9 +39,12 @@ app.use("/api/corrections", correctionsRoutes);
 app.use("/api/import", importRoutes);
 app.use("/api/public", publicRoutes);
 app.use("/api/exports", exportRoutes);
+// Backward compatibility for older frontend calls
+app.use("/api/export", exportRoutes);
 app.use("/api/invites", inviteRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/sms", smsRoutes);
+app.use("/api/notifications", notificationsRoutes);
 
 
 app.get("/api/health", async (req, res) => {

@@ -28,7 +28,14 @@ async function createInvite(req, res) {
       return res.status(400).json({ ok: false, message: "email and role required" });
     }
 
-    const allowedRoles = ["ADMIN", "TEACHER", "STUDENT"];
+    const allowedRoles = [
+      "ADMIN",
+      "TEACHER",
+      "STUDENT",
+      "EXAM_HEAD",
+      "CAMPUS_CHIEF",
+      "ASSISTANT_CAMPUS_CHIEF",
+    ];
     if (!allowedRoles.includes(role)) {
       return res.status(400).json({ ok: false, message: "Invalid role for invite" });
     }

@@ -1,5 +1,6 @@
 const db = require("../db");
 const { verifyPassword } = require("../utils/crypto");
+const { getExamTermPolicy } = require("../utils/examTermPolicy");
 
 // Create exam
 async function createExam(req, res) {
@@ -174,8 +175,11 @@ async function getExamComponents(req, res) {
   }
 
   const [[exam]] = await db.query(
-    `SELECT id, name, campus_id, academic_year_id, class_id, faculty_id, is_locked, published_at
-     FROM exams WHERE id=? LIMIT 1`,
+    `SELECT e.id, e.name, e.campus_id, e.academic_year_id, e.class_id, e.faculty_id,
+            e.exam_type, e.is_locked, e.published_at, cl.name AS class_name
+     FROM exams e
+     LEFT JOIN classes cl ON cl.id=e.class_id
+     WHERE e.id=? LIMIT 1`,
     [examId]
   );
   if (!exam) return res.status(404).json({ ok: false, message: "Exam not found" });
@@ -288,7 +292,13 @@ async function setExamComponents(req, res) {
   }
 
   // lock check (must be AFTER examId is defined)
-  const [[exam]] = await db.query(`SELECT is_locked FROM exams WHERE id=? LIMIT 1`, [examId]);
+  const [[exam]] = await db.query(
+    `SELECT e.is_locked, e.exam_type, e.class_id, cl.name AS class_name
+     FROM exams e
+     LEFT JOIN classes cl ON cl.id=e.class_id
+     WHERE e.id=? LIMIT 1`,
+    [examId]
+  );
   if (exam?.is_locked) {
     return res.status(423).json({ ok: false, message: "Exam is locked (published)" });
   }
@@ -302,18 +312,48 @@ async function setExamComponents(req, res) {
   // delete then insert (simple)
   await db.query(`DELETE FROM exam_component_configs WHERE exam_id=?`, [examId]);
 
+  const codes = [...new Set(
+    components
+      .map((c) => String(c?.component_code || "").trim())
+      .filter(Boolean)
+  )];
+  const typeByCode = new Map();
+  if (codes.length) {
+    const [typeRows] = await db.query(
+      `SELECT component_code, component_type
+       FROM subject_components
+       WHERE component_code IN (?)`,
+      [codes]
+    );
+    for (const r of typeRows) {
+      const code = String(r.component_code || "").trim();
+      if (code && !typeByCode.has(code)) {
+        typeByCode.set(code, String(r.component_type || "").toUpperCase());
+      }
+    }
+  }
+
+  const termPolicy = getExamTermPolicy(exam?.exam_type, exam?.class_name);
+
   for (const c of components) {
     if (!c.component_code || c.full_marks == null) continue;
+    const code = String(c.component_code).trim();
+    const type = typeByCode.get(code) || "";
+    let isEnabled = c.is_enabled === false ? 0 : 1;
+    if (type === "IN" && termPolicy.forceEnableIN === false) isEnabled = 0;
+    if (type === "IN" && termPolicy.forceEnableIN === true) isEnabled = 1;
+    if (type === "PR" && termPolicy.forceEnablePR === false) isEnabled = 0;
+    if (type === "PR" && termPolicy.forceEnablePR === true) isEnabled = 1;
 
     await db.query(
       `INSERT INTO exam_component_configs (exam_id, component_code, full_marks, pass_marks, is_enabled)
        VALUES (?,?,?,?,?)`,
       [
         examId,
-        String(c.component_code).trim(),
+        code,
         Number(c.full_marks),
         c.pass_marks != null ? Number(c.pass_marks) : null,
-        c.is_enabled === false ? 0 : 1,
+        isEnabled,
       ]
     );
   }

@@ -10,7 +10,7 @@ const {
   listClasses,
   listGradingSchemes,
   listBatches, createBatch,
-  updateBatch,
+  updateBatch, deleteBatch,
   listSections, createSection,
   updateSection,
   getSubjectCatalog, shiftOptionalSubjectGroup, getSubjectById
@@ -33,24 +33,84 @@ router.post("/faculties", requireAuth, requireRole("SUPER_ADMIN"), createFaculty
 router.put("/faculties/:id", requireAuth, requireRole("SUPER_ADMIN"), updateFaculty);
 
 // Classes
-router.get("/classes", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), listClasses);
+router.get(
+  "/classes",
+  requireAuth,
+  requireRole(
+    "SUPER_ADMIN",
+    "ADMIN",
+    "EXAM_HEAD",
+    "CAMPUS_CHIEF",
+    "ASSISTANT_CAMPUS_CHIEF"
+  ),
+  listClasses
+);
 
 // Grading schemes
-router.get("/grading-schemes", requireAuth, requireRole("SUPER_ADMIN", "ADMIN", "TEACHER"), listGradingSchemes);
+router.get(
+  "/grading-schemes",
+  requireAuth,
+  requireRole(
+    "SUPER_ADMIN",
+    "ADMIN",
+    "TEACHER",
+    "EXAM_HEAD",
+    "CAMPUS_CHIEF",
+    "ASSISTANT_CAMPUS_CHIEF"
+  ),
+  listGradingSchemes
+);
 
 // Batches
-router.get("/batches", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), listBatches);
+router.get(
+  "/batches",
+  requireAuth,
+  requireRole(
+    "SUPER_ADMIN",
+    "ADMIN",
+    "TEACHER",
+    "EXAM_HEAD",
+    "CAMPUS_CHIEF",
+    "ASSISTANT_CAMPUS_CHIEF"
+  ),
+  listBatches
+);
 router.post("/batches", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), createBatch);
 router.put("/batches/:id", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), updateBatch);
+router.delete("/batches/:id", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), deleteBatch);
 
 // Sections
 router.get("/sections", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), listSections);
 router.post("/sections", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), createSection);
 router.put("/sections/:id", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), updateSection);
 
-router.get("/subject-catalog", requireAuth, requireRole("SUPER_ADMIN", "ADMIN", "TEACHER"), getSubjectCatalog);
+router.get(
+  "/subject-catalog",
+  requireAuth,
+  requireRole(
+    "SUPER_ADMIN",
+    "ADMIN",
+    "TEACHER",
+    "EXAM_HEAD",
+    "CAMPUS_CHIEF",
+    "ASSISTANT_CAMPUS_CHIEF"
+  ),
+  getSubjectCatalog
+);
 router.post("/subject-codes/shift", requireAuth, requireRole("SUPER_ADMIN"), shiftOptionalSubjectGroup);
-router.get("/subjects/:id", requireAuth, requireRole("SUPER_ADMIN", "ADMIN", "TEACHER"), getSubjectById);
+router.get(
+  "/subjects/:id",
+  requireAuth,
+  requireRole(
+    "SUPER_ADMIN",
+    "ADMIN",
+    "TEACHER",
+    "EXAM_HEAD",
+    "CAMPUS_CHIEF",
+    "ASSISTANT_CAMPUS_CHIEF"
+  ),
+  getSubjectById
+);
 
 
 module.exports = router;

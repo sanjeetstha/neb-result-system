@@ -20,7 +20,7 @@ export const MENUS = {
     { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
     { label: "Reports", path: "/reports", icon: BarChart3 },
     { label: "Corrections", path: "/corrections", icon: BadgeCheck },
-    { label: "Public Portal", path: "/public", icon: Globe },
+    { label: "Public Portal", path: "/public/portal", icon: Globe },
     // { label: "Marks New", path: "/marks/student", icon: PencilRuler },
     
   ],
@@ -40,9 +40,28 @@ export const MENUS = {
     { label: "Corrections", path: "/corrections", icon: BadgeCheck },
     { label: "Reports", path: "/reports", icon: BarChart3 },
   ],
+  EXAM_HEAD: [
+    { label: "Dashboard", path: "/", icon: LayoutDashboard },
+    { label: "Exams", path: "/exams", icon: ClipboardList },
+    { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
+    { label: "Reports", path: "/reports", icon: BarChart3 },
+  ],
+  CAMPUS_CHIEF: [
+    { label: "Dashboard", path: "/", icon: LayoutDashboard },
+    { label: "Exams", path: "/exams", icon: ClipboardList },
+    { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
+    { label: "Reports", path: "/reports", icon: BarChart3 },
+  ],
+  ASSISTANT_CAMPUS_CHIEF: [
+    { label: "Dashboard", path: "/", icon: LayoutDashboard },
+    { label: "Exams", path: "/exams", icon: ClipboardList },
+    { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
+    { label: "Reports", path: "/reports", icon: BarChart3 },
+  ],
   STUDENT: [
     { label: "Dashboard", path: "/", icon: LayoutDashboard },
     { label: "My Results", path: "/my-results", icon: BadgeCheck },
   ],
-  PUBLIC: [{ label: "Public Portal", path: "/public", icon: Globe }],
+  PUBLIC: [{ label: "Public Portal", path: "/public/portal", icon: Globe }],
+  GENERAL_PUBLIC: [{ label: "Public Portal", path: "/public/portal", icon: Globe }],
 };

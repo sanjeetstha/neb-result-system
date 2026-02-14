@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { api } from "../../lib/api";
+import { publicApi } from "../../lib/publicApi";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Badge } from "../../components/ui/badge";
@@ -18,11 +18,12 @@ export default function ResultsSearchPage({ title = "Result Portal", variant = "
   const [symbolNo, setSymbolNo] = useState("");
   const [dob, setDob] = useState("");
   const [result, setResult] = useState(null);
+  const [downloading, setDownloading] = useState("");
 
   const examsQ = useQuery({
     queryKey: ["public", "exams"],
     queryFn: async () => {
-      const res = await api.get("/api/public/exams");
+      const res = await publicApi.get("/api/public/exams");
       const data = res.data?.exams ?? res.data?.data ?? res.data ?? [];
       return Array.isArray(data) ? data : [];
     },
@@ -43,7 +44,7 @@ export default function ResultsSearchPage({ title = "Result Portal", variant = "
         symbol_no: norm(symbolNo),
         dob: norm(dob),
       };
-      const res = await api.post("/api/public/results/search", payload);
+      const res = await publicApi.post("/api/public/results/search", payload);
       return res.data;
     },
     onSuccess: (data) => {
@@ -62,16 +63,48 @@ export default function ResultsSearchPage({ title = "Result Portal", variant = "
   const payload = result?.result || {};
   const subjects = Array.isArray(payload?.subjects) ? payload.subjects : [];
 
-  const downloadQuery = useMemo(() => {
-    if (!examId || !symbolNo || !dob) return "";
-    return `?exam_id=${encodeURIComponent(examId)}&symbol_no=${encodeURIComponent(
-      norm(symbolNo)
-    )}&dob=${encodeURIComponent(norm(dob))}`;
-  }, [examId, symbolNo, dob]);
-
-  const apiBase = import.meta.env.VITE_API_BASE_URL || "";
+  const canDownload = Boolean(examId && symbolNo && dob);
 
   const compact = variant === "compact";
+
+  const openPdf = async (type) => {
+    if (!canDownload || downloading) return;
+    const isMarksheet = type === "marksheet";
+    const endpoint = isMarksheet ? "/api/public/marksheet.pdf" : "/api/public/transcript.pdf";
+    setDownloading(type);
+    try {
+      const res = await publicApi.get(endpoint, {
+        params: {
+          exam_id: Number(examId),
+          symbol_no: norm(symbolNo),
+          dob: norm(dob),
+        },
+        responseType: "blob",
+      });
+      const blob = res.data instanceof Blob ? res.data : new Blob([res.data]);
+      const contentType = String(res.headers?.["content-type"] || blob.type || "").toLowerCase();
+      if (!contentType.includes("pdf")) {
+        const text = await blob.text().catch(() => "");
+        let message = "Failed to load PDF document";
+        if (text) {
+          try {
+            const parsed = JSON.parse(text);
+            message = parsed?.message || message;
+          } catch {
+            message = text.slice(0, 180) || message;
+          }
+        }
+        throw new Error(message);
+      }
+      const blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || err?.message || "Failed to open PDF");
+    } finally {
+      setDownloading("");
+    }
+  };
 
   return (
     <div className={compact ? "space-y-3" : "space-y-4"}>
@@ -208,25 +241,23 @@ export default function ResultsSearchPage({ title = "Result Portal", variant = "
               </table>
             </div>
 
-            {downloadQuery ? (
+            {canDownload ? (
               <div className="flex flex-wrap gap-2">
-                <Button asChild variant="outline">
-                  <a
-                    href={`${apiBase}/api/public/marksheet.pdf${downloadQuery}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Download Marksheet (PDF)
-                  </a>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!!downloading}
+                  onClick={() => openPdf("marksheet")}
+                >
+                  {downloading === "marksheet" ? "Opening..." : "Open Marksheet (PDF)"}
                 </Button>
-                <Button asChild variant="outline">
-                  <a
-                    href={`${apiBase}/api/public/transcript.pdf${downloadQuery}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Download Transcript (PDF)
-                  </a>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!!downloading}
+                  onClick={() => openPdf("transcript")}
+                >
+                  {downloading === "transcript" ? "Opening..." : "Open Transcript (PDF)"}
                 </Button>
               </div>
             ) : null}

@@ -8,6 +8,7 @@ import { Input } from "../../components/ui/input";
 import { Badge } from "../../components/ui/badge";
 import { Card, CardContent } from "../../components/ui/card";
 import { Separator } from "../../components/ui/separator";
+import ResultPreviewDialog from "../../components/results/ResultPreviewDialog";
 
 function norm(v) {
   return String(v ?? "").trim();
@@ -25,6 +26,21 @@ function pad4(code) {
   if (!s) return "";
   if (s.length >= 4) return s;
   return s.padStart(4, "0");
+}
+
+function parseOptionalRank(name) {
+  const s = String(name || "").trim().toLowerCase();
+  const m = s.match(/(\d+)/);
+  if (m) return Number(m[1]);
+  if (s.includes("first")) return 1;
+  if (s.includes("second")) return 2;
+  if (s.includes("third")) return 3;
+  if (s.includes("fourth")) return 4;
+  return 999;
+}
+
+function isOptionalGroup(name) {
+  return /^\s*opt/i.test(String(name || ""));
 }
 
 function Select({ label, value, onChange, options, placeholder }) {
@@ -146,6 +162,22 @@ export default function MarksEntryPage() {
       .filter((x) => x.value);
   }, [studentsQ.data]);
 
+  const selectedStudent = useMemo(() => {
+    const arr = studentsQ.data || [];
+    return (
+      arr.find(
+        (x) =>
+          String(
+            x.enrollment_id ??
+              x.enrollmentId ??
+              x.id_enrollment ??
+              x.enrollment?.id ??
+              ""
+          ) === String(enrollmentId)
+      ) || null
+    );
+  }, [studentsQ.data, enrollmentId]);
+
   // ----------------- STUDENT PROFILE + OPTIONALS -----------------
   const profileQ = useQuery({
     queryKey: ["students", "profile", enrollmentId],
@@ -176,18 +208,24 @@ export default function MarksEntryPage() {
   useEffect(() => {
     setEnrollmentId("");
     setMarks({});
+    setPreviewData(null);
+    setPreviewOpen(false);
   }, [batchId]);
 
   // reset marks if exam changed
   useEffect(() => {
     setMarks({});
     setLedgerQuery("");
+    setPreviewData(null);
+    setPreviewOpen(false);
   }, [examId]);
 
   useEffect(() => {
     if (!enrollmentId) {
       setOptDraft({});
       setOptDirty(false);
+      setPreviewData(null);
+      setPreviewOpen(false);
     }
   }, [enrollmentId]);
 
@@ -226,14 +264,17 @@ export default function MarksEntryPage() {
       [];
     const arr = Array.isArray(items) ? items : [];
 
-    return arr.map((r) => ({
-      component_code: String(r.component_code ?? r.code ?? "").trim(),
-      component_title: r.component_title ?? r.title ?? "",
-      subject_name: r.subject_name ?? r.subject ?? "",
-      full_marks: r.full_marks ?? r.max_marks ?? null,
-      obtained: r.marks ?? r.obtained_marks ?? r.value ?? "",
-      raw: r,
-    })).filter((x) => x.component_code);
+    return arr
+      .map((r) => ({
+        component_code: String(r.component_code ?? r.code ?? "").trim(),
+        component_title: r.component_title ?? r.title ?? "",
+        subject_name: r.subject_name ?? r.subject ?? "",
+        full_marks: r.full_marks ?? r.max_marks ?? null,
+        enabled_in_exam: r.enabled_in_exam == null ? true : !!r.enabled_in_exam,
+        obtained: r.marks ?? r.obtained_marks ?? r.value ?? "",
+        raw: r,
+      }))
+      .filter((x) => x.component_code && x.enabled_in_exam);
   }, [ledgerQ.data]);
 
   const filteredLedgerRows = useMemo(() => {
@@ -298,8 +339,9 @@ export default function MarksEntryPage() {
     mutationFn: async () => {
       if (!enrollmentId) throw new Error("Missing enrollment id");
 
+      const allowedGroups = new Set(optionalGroups.map((g) => g.group_name));
       const choices = Object.entries(optDraft)
-        .filter(([, sid]) => Number(sid) > 0)
+        .filter(([group_name, sid]) => allowedGroups.has(group_name) && Number(sid) > 0)
         .map(([group_name, subject_id]) => ({
           group_name,
           subject_id: Number(subject_id),
@@ -323,42 +365,38 @@ export default function MarksEntryPage() {
   });
 
   // ----------------- RESULT PREVIEW -----------------
-  const previewQ = useQuery({
-    queryKey: ["results", "preview", examId, enrollmentId],
-    enabled: false,
-    queryFn: async () => {
-      const res = await api.get(`/api/results/${examId}/enrollments/${enrollmentId}/preview`);
-      return res.data;
-    },
-  });
-  
-  const [preview, setPreview] = useState(null);
+  const [previewData, setPreviewData] = useState(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
+  const getPreviewSubjectCount = (payload) => {
+    const result = payload?.result || payload || {};
+    if (Array.isArray(result.subjects)) return result.subjects.length;
+    if (Array.isArray(result.subject_results)) return result.subject_results.length;
+    if (Array.isArray(result.rows)) return result.rows.length;
+    return 0;
+  };
 
-  // const runPreview = async () => {
-  //   try {
-  //     const data = await previewQ.refetch();
-  //     if (data?.data?.ok === false) throw new Error(data?.data?.message || "Preview failed");
-  //     toast.success("Preview loaded");
-  //   } catch (e) {
-  //     toast.error(e?.message || "Preview failed");
-  //   }
-  // };
-
-    const runPreview = async () => {
-      try {
-        const res = await api.get(
-          `/api/results/${examId}/enrollments/${enrollmentId}/preview`
-        );
-
-        setPreview(res.data);
-        toast.success("Result preview loaded");
-      } catch (e) {
-        toast.error(
-          e?.response?.data?.message || e.message || "Preview failed"
-        );
+  const runPreview = async () => {
+    try {
+      if (!examId || !enrollmentId) {
+        throw new Error("Select exam and student first");
       }
-    };
+      const res = await api.get(
+        `/api/results/${examId}/enrollments/${enrollmentId}/preview`
+      );
+      const payload = res.data || null;
+      if (!payload) throw new Error("Preview data is incomplete");
+
+      setPreviewData(payload);
+      setPreviewOpen(true);
+      toast.success(`Result preview loaded (${getPreviewSubjectCount(payload)} subjects)`);
+    } catch (e) {
+      setPreviewData(null);
+      toast.error(
+        e?.response?.data?.message || e.message || "Preview failed"
+      );
+    }
+  };
 
 
 
@@ -376,6 +414,7 @@ export default function MarksEntryPage() {
     const normalizedFromCatalog = groups
       .map((g) => {
         const group_name = g.group_name || g.name || g.title || "";
+        if (!isOptionalGroup(group_name)) return null;
         const subs = g.subjects || g.items || g.subject_list || [];
         const subjects = (Array.isArray(subs) ? subs : []).map((s) => {
           const components = s.components || [];
@@ -392,7 +431,10 @@ export default function MarksEntryPage() {
       })
       .filter(Boolean);
 
-    if (normalizedFromCatalog.length > 0) return normalizedFromCatalog;
+    if (normalizedFromCatalog.length > 0) {
+      return normalizedFromCatalog
+        .sort((a, b) => parseOptionalRank(a.group_name) - parseOptionalRank(b.group_name));
+    }
 
     const choiceGroups = (profileQ.data?.optional_choices || [])
       .map((c) => c.group_name)
@@ -405,11 +447,26 @@ export default function MarksEntryPage() {
       code: s.components?.[0]?.component_code || "",
     }));
 
-    return uniqueGroups.map((group_name) => ({
-      group_name,
-      subjects: fallbackSubjects,
-    }));
+    return uniqueGroups
+      .filter((group_name) => isOptionalGroup(group_name))
+      .sort((a, b) => parseOptionalRank(a) - parseOptionalRank(b))
+      .map((group_name) => ({
+        group_name,
+        subjects: fallbackSubjects,
+      }));
   }, [catalogQ.data, profileQ.data, profileQ.data?.optional_choices]);
+
+  const selectedOptionalCount = useMemo(() => {
+    return optionalGroups.reduce(
+      (count, g) => count + (Number(optDraft[g.group_name] || 0) > 0 ? 1 : 0),
+      0
+    );
+  }, [optionalGroups, optDraft]);
+
+  const visibleOptionalGroups = useMemo(() => {
+    if (selectedOptionalCount < 3) return optionalGroups;
+    return optionalGroups.filter((g) => Number(optDraft[g.group_name] || 0) > 0);
+  }, [optionalGroups, optDraft, selectedOptionalCount]);
 
   return (
     <div className="space-y-4">
@@ -520,7 +577,7 @@ export default function MarksEntryPage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                {optionalGroups.map((g) => {
+                {visibleOptionalGroups.map((g) => {
                   const current = optDraft[g.group_name] ?? "";
                   const opts = (g.subjects || []).map((s) => ({
                     value: String(s.id),
@@ -536,7 +593,14 @@ export default function MarksEntryPage() {
                           value={String(current || "")}
                           onChange={(e) => {
                             const v = e.target.value;
-                            setOptDraft((p) => ({ ...p, [g.group_name]: v }));
+                            setOptDraft((p) => {
+                              const prevValue = Number(p[g.group_name] || 0);
+                              if (v && !prevValue && selectedOptionalCount >= 3) {
+                                toast.error("Only 3 optional subjects can be selected");
+                                return p;
+                              }
+                              return { ...p, [g.group_name]: v };
+                            });
                             setOptDirty(true);
                           }}
                           disabled={isPublished}
@@ -679,109 +743,32 @@ export default function MarksEntryPage() {
                 ))
               )}
 
-              {/* {previewQ.data ? (
-                <div className="rounded-lg border p-3">
-                  <div className="text-sm font-medium">Result Preview</div>
-                  <pre className="mt-2 text-xs overflow-auto p-2 rounded-md bg-muted">
-{JSON.stringify(previewQ.data, null, 2)}
-                  </pre>
-                </div>
-              ) : null} */}
-
-              {preview && (
-                <div className="rounded-lg border mt-6">
-                  <div className="p-3 border-b flex justify-between items-center">
-                    <div className="text-sm font-semibold">Result Preview</div>
-                    <Badge variant="outline">
-                      {preview?.result?.status || "PREVIEW"}
-                    </Badge>
-                  </div>
-
-                  <div className="p-4 space-y-4">
-                    {/* Student Info */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                      <div>
-                        <div className="text-muted-foreground">Student</div>
-                        <div className="font-medium">
-                          {preview?.student?.full_name}
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="text-muted-foreground">Symbol No</div>
-                        <div className="font-mono">
-                          {preview?.student?.symbol_no}
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="text-muted-foreground">Exam</div>
-                        <div className="font-medium">
-                          {preview?.exam?.name}
-                        </div>
-                      </div>
-                    </div>
-
-                    <Separator />
-
-                    {/* Subject Table */}
-                    <div className="overflow-auto">
-                      <table className="w-full text-sm border rounded-md">
-                        <thead className="bg-muted">
-                          <tr>
-                            <th className="p-2 text-left">Subject</th>
-                            <th className="p-2 text-center">Marks</th>
-                            <th className="p-2 text-center">Grade</th>
-                            <th className="p-2 text-center">GPA</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {preview?.subjects?.map((s, i) => (
-                            <tr key={i} className="border-t">
-                              <td className="p-2">{s.subject_name}</td>
-                              <td className="p-2 text-center">{s.total_marks}</td>
-                              <td className="p-2 text-center">{s.grade}</td>
-                              <td className="p-2 text-center">{s.gpa}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    <Separator />
-
-                    {/* Final Summary */}
-                    <div className="flex flex-wrap gap-4 text-sm">
-                      <div>
-                        <span className="text-muted-foreground">Final GPA:</span>{" "}
-                        <span className="font-semibold text-lg">
-                          {preview?.result?.final_gpa}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="text-muted-foreground">Result:</span>{" "}
-                        <Badge
-                          variant={
-                            preview?.result?.status === "PASS"
-                              ? "secondary"
-                              : "destructive"
-                          }
-                        >
-                          {preview?.result?.status}
-                        </Badge>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-
-
             </div>
           )}
         </div>
       </div>
+
+      <ResultPreviewDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        previewData={previewData}
+        loading={false}
+        examLabel={selectedExam?.name || selectedExam?.title || `Exam #${examId || "—"}`}
+        enrollmentId={enrollmentId}
+        student={{
+          full_name:
+            profileQ.data?.enrollment?.full_name ||
+            selectedStudent?.full_name ||
+            selectedStudent?.name ||
+            "",
+          symbol_no:
+            profileQ.data?.enrollment?.symbol_no ||
+            selectedStudent?.symbol_no ||
+            selectedStudent?.symbol ||
+            "",
+          enrollment_id: enrollmentId || "",
+        }}
+      />
     </div>
   );
 }

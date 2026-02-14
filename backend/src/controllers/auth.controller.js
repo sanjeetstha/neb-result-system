@@ -77,7 +77,14 @@ async function createUser(req, res) {
   }
 
   // only allow these roles to be created via this endpoint
-  const allowed = ["ADMIN", "TEACHER", "STUDENT"];
+  const allowed = [
+    "ADMIN",
+    "TEACHER",
+    "STUDENT",
+    "EXAM_HEAD",
+    "CAMPUS_CHIEF",
+    "ASSISTANT_CAMPUS_CHIEF",
+  ];
   if (!allowed.includes(role)) {
     return res.status(400).json({ ok: false, message: "Role not allowed here" });
   }

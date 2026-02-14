@@ -102,7 +102,7 @@ export default function Sidebar({
           { label: "Corrections", path: "/corrections", icon: BadgeCheck },
           { label: "Bulk SMS", path: "/results/sms", icon: MessageSquare },
           { label: "Marksheet Print", path: "/results/marksheet", icon: Printer },
-          { label: "Public Portal", path: "/public", icon: Globe },
+          { label: "Public Portal", path: "/public/portal", icon: Globe },
           { label: "My Results", path: "/my-results", icon: BadgeCheck },
         ],
       },
@@ -146,7 +146,7 @@ export default function Sidebar({
           { label: "Corrections", path: "/corrections", icon: BadgeCheck },
           { label: "Bulk SMS", path: "/results/sms", icon: MessageSquare },
           { label: "Marksheet Print", path: "/results/marksheet", icon: Printer },
-          { label: "Public Portal", path: "/public", icon: Globe },
+          { label: "Public Portal", path: "/public/portal", icon: Globe },
           { label: "My Results", path: "/my-results", icon: BadgeCheck },
         ],
       },
@@ -186,7 +186,82 @@ export default function Sidebar({
           { label: "Corrections", path: "/corrections", icon: BadgeCheck },
           { label: "Reports", path: "/reports", icon: BarChart3 },
           { label: "Bulk SMS", path: "/results/sms", icon: MessageSquare },
-          { label: "Public Portal", path: "/public", icon: Globe },
+          { label: "Public Portal", path: "/public/portal", icon: Globe },
+        ],
+      },
+      {
+        label: "Account",
+        icon: UserCog,
+        children: [{ label: "Profile", path: "/account/profile", icon: UserCog }],
+      },
+    ],
+    EXAM_HEAD: [
+      { label: "Dashboard", path: "/", icon: LayoutDashboard },
+      {
+        label: "Academics",
+        icon: ClipboardList,
+        children: [
+          { label: "Exam Manager", path: "/exams", icon: ClipboardList },
+          { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
+        ],
+      },
+      {
+        label: "Results",
+        icon: BarChart3,
+        children: [
+          { label: "Reports", path: "/reports", icon: BarChart3 },
+          { label: "Marksheet Print", path: "/results/marksheet", icon: Printer },
+          { label: "Public Portal", path: "/public/portal", icon: Globe },
+        ],
+      },
+      {
+        label: "Account",
+        icon: UserCog,
+        children: [{ label: "Profile", path: "/account/profile", icon: UserCog }],
+      },
+    ],
+    CAMPUS_CHIEF: [
+      { label: "Dashboard", path: "/", icon: LayoutDashboard },
+      {
+        label: "Academics",
+        icon: ClipboardList,
+        children: [
+          { label: "Exam Manager", path: "/exams", icon: ClipboardList },
+          { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
+        ],
+      },
+      {
+        label: "Results",
+        icon: BarChart3,
+        children: [
+          { label: "Reports", path: "/reports", icon: BarChart3 },
+          { label: "Marksheet Print", path: "/results/marksheet", icon: Printer },
+          { label: "Public Portal", path: "/public/portal", icon: Globe },
+        ],
+      },
+      {
+        label: "Account",
+        icon: UserCog,
+        children: [{ label: "Profile", path: "/account/profile", icon: UserCog }],
+      },
+    ],
+    ASSISTANT_CAMPUS_CHIEF: [
+      { label: "Dashboard", path: "/", icon: LayoutDashboard },
+      {
+        label: "Academics",
+        icon: ClipboardList,
+        children: [
+          { label: "Exam Manager", path: "/exams", icon: ClipboardList },
+          { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
+        ],
+      },
+      {
+        label: "Results",
+        icon: BarChart3,
+        children: [
+          { label: "Reports", path: "/reports", icon: BarChart3 },
+          { label: "Marksheet Print", path: "/results/marksheet", icon: Printer },
+          { label: "Public Portal", path: "/public/portal", icon: Globe },
         ],
       },
       {
@@ -198,14 +273,15 @@ export default function Sidebar({
     STUDENT: [
       { label: "Dashboard", path: "/", icon: LayoutDashboard },
       { label: "My Results", path: "/my-results", icon: BadgeCheck },
-      { label: "Public Portal", path: "/public", icon: Globe },
+      { label: "Public Portal", path: "/public/portal", icon: Globe },
       {
         label: "Account",
         icon: UserCog,
         children: [{ label: "Profile", path: "/account/profile", icon: UserCog }],
       },
     ],
-    PUBLIC: [{ label: "Public Portal", path: "/public", icon: Globe }],
+    PUBLIC: [{ label: "Public Portal", path: "/public/portal", icon: Globe }],
+    GENERAL_PUBLIC: [{ label: "Public Portal", path: "/public/portal", icon: Globe }],
   };
 
   const menuItems = MENUS[role] || MENUS.STUDENT;

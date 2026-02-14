@@ -1,5 +1,10 @@
 const db = require("../db");
 const { verifyPassword } = require("../utils/crypto");
+const {
+  MAX_OPTIONAL_SUBJECTS,
+  getAllowedOptionalChoicesForEnrollment,
+  getCompulsorySubjectIds,
+} = require("../services/subjectSelection.service");
 
 async function createStudent(req, res) {
   const {
@@ -132,11 +137,25 @@ async function setOptionalChoices(req, res) {
     return res.status(400).json({ ok: false, message: "choices array required" });
   }
 
-  // Upsert: delete existing then insert new
-  await db.query(`DELETE FROM student_optional_choices WHERE enrollment_id=?`, [enrollmentId]);
+  const normalized = await getAllowedOptionalChoicesForEnrollment(
+    enrollmentId,
+    choices,
+    MAX_OPTIONAL_SUBJECTS
+  );
+  if (normalized.invalidSubjectIds.length) {
+    return res.status(400).json({
+      ok: false,
+      message: "Only optional subjects can be selected",
+      invalid_subject_ids: normalized.invalidSubjectIds,
+    });
+  }
+  if (normalized.choices.length === 0) {
+    return res.status(400).json({ ok: false, message: "Select at least one optional subject" });
+  }
 
-  for (const ch of choices) {
-    if (!ch.group_name || !ch.subject_id) continue;
+  // Upsert: delete existing then insert normalized (max 3)
+  await db.query(`DELETE FROM student_optional_choices WHERE enrollment_id=?`, [enrollmentId]);
+  for (const ch of normalized.choices) {
     await db.query(
       `INSERT INTO student_optional_choices (enrollment_id, group_name, subject_id)
        VALUES (?,?,?)`,
@@ -144,7 +163,12 @@ async function setOptionalChoices(req, res) {
     );
   }
 
-  res.json({ ok: true, message: "Optional choices saved" });
+  res.json({
+    ok: true,
+    message: "Optional choices saved",
+    selected_count: normalized.choices.length,
+    max_optional_subjects: MAX_OPTIONAL_SUBJECTS,
+  });
 }
 
 async function getStudentProfile(req, res) {
@@ -160,37 +184,30 @@ async function getStudentProfile(req, res) {
   );
   if (!en) return res.status(404).json({ ok: false, message: "Enrollment not found" });
 
-  // catalog groups for that year/class (faculty is NULL currently)
-  const [groups] = await db.query(
-    `SELECT id, name, sort_order
-     FROM catalog_groups
-     WHERE academic_year_id <=> ? AND class_id <=> ? AND faculty_id IS NULL
-     ORDER BY sort_order ASC`,
-    [en.academic_year_id, en.class_id]
-  );
-
-  const groupByName = new Map(groups.map(g => [g.name, g]));
-
   // compulsory subjects
-  const compulsory = groupByName.get("COMPULSORY");
+  const compulsorySubjectIds = await getCompulsorySubjectIds(en.academic_year_id, en.class_id);
   let compulsorySubjects = [];
-  if (compulsory) {
+  if (compulsorySubjectIds.length) {
     const [rows] = await db.query(
       `SELECT s.id, s.name
-       FROM catalog_group_subjects cgs
-       JOIN subjects s ON s.id=cgs.subject_id
-       WHERE cgs.catalog_group_id=?
-       ORDER BY cgs.sort_order ASC`,
-      [compulsory.id]
+       FROM subjects s
+       WHERE s.id IN (?)
+       ORDER BY s.name ASC`,
+      [compulsorySubjectIds]
     );
     compulsorySubjects = rows;
   }
 
   // optional choices selected
-  const [choices] = await db.query(
-    `SELECT group_name, subject_id FROM student_optional_choices WHERE enrollment_id=?`,
-    [enrollmentId]
+  const normalized = await getAllowedOptionalChoicesForEnrollment(
+    enrollmentId,
+    (await db.query(
+      `SELECT group_name, subject_id FROM student_optional_choices WHERE enrollment_id=?`,
+      [enrollmentId]
+    ))[0],
+    MAX_OPTIONAL_SUBJECTS
   );
+  const choices = normalized.choices;
 
   const chosenSubjectIds = choices.map(c => c.subject_id);
   const [chosenSubjects] = chosenSubjectIds.length

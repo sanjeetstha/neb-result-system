@@ -1,10 +1,16 @@
 const router = require("express").Router();
+const { requirePublicPortalAccess } = require("../middlewares/auth");
 
 const {
   listPublishedExams,
   searchPublishedResult,
   getPublishedResultByPath,
 } = require("../controllers/public.controller");
+const {
+  requestPublicOtp,
+  verifyPublicOtp,
+  getPublicSession,
+} = require("../controllers/publicAuth.controller");
 
 const {
   marksheetPdf,
@@ -14,16 +20,25 @@ const {
 } = require("../controllers/export.controller");
 
 // No auth (public)
-router.get("/exams", listPublishedExams);
-router.post("/results/search", searchPublishedResult);
-router.get("/results/:examId/:symbolNo", getPublishedResultByPath);
+router.post("/auth/request-otp", requestPublicOtp);
+router.post("/auth/verify-otp", verifyPublicOtp);
+router.get("/auth/session", requirePublicPortalAccess, getPublicSession);
 
-// Public PDF exports
-router.get("/marksheet.pdf", marksheetPdf);
-router.get("/transcript.pdf", transcriptPdf);
+// Public discovery (session protected)
+router.get("/exams", requirePublicPortalAccess, listPublishedExams);
+router.post("/results/search", requirePublicPortalAccess, searchPublishedResult);
+router.get(
+  "/results/:examId/:symbolNo",
+  requirePublicPortalAccess,
+  getPublishedResultByPath
+);
 
-// Public JPG exports (first page)
-router.get("/marksheet.jpg", marksheetJpg);
-router.get("/transcript.jpg", transcriptJpg);
+// Public PDF exports (OTP/session protected)
+router.get("/marksheet.pdf", requirePublicPortalAccess, marksheetPdf);
+router.get("/transcript.pdf", requirePublicPortalAccess, transcriptPdf);
+
+// Public JPG exports (first page; OTP/session protected)
+router.get("/marksheet.jpg", requirePublicPortalAccess, marksheetJpg);
+router.get("/transcript.jpg", requirePublicPortalAccess, transcriptJpg);
 
 module.exports = router;

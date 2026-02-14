@@ -50,7 +50,10 @@ export default function CampusesPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deletePassword, setDeletePassword] = useState("");
 
   const [form, setForm] = useState({
     code: "",
@@ -108,12 +111,15 @@ export default function CampusesPage() {
   });
 
   const deleteCampus = useMutation({
-    mutationFn: async (id) => {
-      const res = await api.delete(`/api/masters/campuses/${id}`);
+    mutationFn: async ({ id, password }) => {
+      const res = await api.delete(`/api/masters/campuses/${id}`, { data: { password } });
       return res.data;
     },
     onSuccess: async () => {
       toast.success("Campus deleted");
+      setDeleteOpen(false);
+      setDeleteTarget(null);
+      setDeletePassword("");
       await qc.invalidateQueries({ queryKey: ["masters", "campuses"] });
     },
     onError: (err) => {
@@ -150,9 +156,9 @@ export default function CampusesPage() {
   };
 
   const onDelete = (r) => {
-    const confirmed = window.confirm(`Delete campus "${r.name}"? This action cannot be undone.`);
-    if (!confirmed) return;
-    deleteCampus.mutate(r.id);
+    setDeleteTarget(r);
+    setDeletePassword("");
+    setDeleteOpen(true);
   };
 
   const renderForm = (onSave, savingLabel) => (
@@ -333,6 +339,55 @@ export default function CampusesPage() {
             <DialogTitle>Edit campus</DialogTitle>
           </DialogHeader>
           {renderForm(() => updateCampus.mutate(), "Update")}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={deleteOpen}
+        onOpenChange={(v) => {
+          setDeleteOpen(v);
+          if (!v) {
+            setDeleteTarget(null);
+            setDeletePassword("");
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Campus</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Enter your password to remove campus{" "}
+              <span className="font-medium text-foreground">
+                {deleteTarget?.name ? `"${deleteTarget.name}"` : ""}
+              </span>
+              .
+            </p>
+            <Input
+              type="password"
+              placeholder="Enter password"
+              value={deletePassword}
+              onChange={(e) => setDeletePassword(e.target.value)}
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDeleteOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() =>
+                  deleteCampus.mutate({
+                    id: deleteTarget?.id,
+                    password: deletePassword,
+                  })
+                }
+                disabled={!deleteTarget?.id || !deletePassword || deleteCampus.isPending}
+              >
+                {deleteCampus.isPending ? "Deleting..." : "Delete"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

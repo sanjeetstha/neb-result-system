@@ -14,7 +14,21 @@ export default defineConfig({
     },
   },
   server: {
-    host: "0.0.0.0",
+    host: true,
     port: 5173,
+    strictPort: true,
+    hmr: {
+      // Helps LAN devices (tablet/phone) connect websocket correctly.
+      host: process.env.VITE_DEV_LAN_HOST || undefined,
+      clientPort: 5173,
+    },
+    // Keep API on backend 3000, but expose it through same 5173 origin.
+    // This allows tablets/phones to use only http://<server-ip>:5173.
+    proxy: {
+      "/api": {
+        target: "http://127.0.0.1:3000",
+        changeOrigin: true,
+      },
+    },
   },
 });

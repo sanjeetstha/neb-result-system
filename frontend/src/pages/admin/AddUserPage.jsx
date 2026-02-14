@@ -97,7 +97,7 @@ export default function AddUserPage() {
       <div>
         <div className="text-xl font-semibold">Add User</div>
         <div className="text-sm text-muted-foreground">
-          Create a new ADMIN / TEACHER / STUDENT account.
+          Create a new user account with workflow roles and permissions.
         </div>
       </div>
 
@@ -147,6 +147,11 @@ export default function AddUserPage() {
                 >
                   <option value="ADMIN">ADMIN</option>
                   <option value="TEACHER">TEACHER</option>
+                  <option value="EXAM_HEAD">EXAM_HEAD (Exam Head)</option>
+                  <option value="CAMPUS_CHIEF">CAMPUS_CHIEF (Campus Chief)</option>
+                  <option value="ASSISTANT_CAMPUS_CHIEF">
+                    ASSISTANT_CAMPUS_CHIEF (Asst Campus Chief)
+                  </option>
                   <option value="STUDENT">STUDENT</option>
                 </select>
               </div>

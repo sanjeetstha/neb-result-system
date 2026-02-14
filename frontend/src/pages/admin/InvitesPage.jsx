@@ -119,7 +119,7 @@ export default function InvitesPage() {
       <div>
         <div className="text-xl font-semibold">User Invites</div>
         <div className="text-sm text-muted-foreground">
-          Create invite links for ADMIN / TEACHER / STUDENT accounts.
+          Create invite links for operational and approval workflow roles.
         </div>
       </div>
 
@@ -146,6 +146,11 @@ export default function InvitesPage() {
                 >
                   <option value="ADMIN">ADMIN</option>
                   <option value="TEACHER">TEACHER</option>
+                  <option value="EXAM_HEAD">EXAM_HEAD (Exam Head)</option>
+                  <option value="CAMPUS_CHIEF">CAMPUS_CHIEF (Campus Chief)</option>
+                  <option value="ASSISTANT_CAMPUS_CHIEF">
+                    ASSISTANT_CAMPUS_CHIEF (Asst Campus Chief)
+                  </option>
                   <option value="STUDENT">STUDENT</option>
                 </select>
               </div>

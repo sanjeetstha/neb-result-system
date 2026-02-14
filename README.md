@@ -1,6 +1,6 @@
 # NEB Result System
 
-A full-stack NEB +2 result management system for exam setup, bulk marks entry, result generation, reporting, and public/student portals.
+A full-stack NEB +2 & higher Education result management system for exam setup, bulk marks entry, result generation, reporting, and public/student portals.
 
 ## Highlights
 - Terminal-wise exam setup with configurable full marks

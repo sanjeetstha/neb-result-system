@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import ProtectedRoute from "./ProtectedRoute";
+import PublicPortalRoute from "./PublicPortalRoute";
 
 import LoginPage from "../pages/auth/LoginPage";
 import ResetPasswordPage from "../pages/auth/ResetPasswordPage";
@@ -26,6 +27,7 @@ import InvitesPage from "../pages/admin/InvitesPage";
 import AddUserPage from "../pages/admin/AddUserPage";
 import UsersPage from "../pages/admin/UsersPage";
 import PublicResultsPage from "../pages/public/PublicResultsPage";
+import PublicPortalAccessPage from "../pages/public/PublicPortalAccessPage";
 import MyResultsPage from "../pages/student/MyResultsPage";
 import SettingsPage from "../pages/admin/SettingsPage";
 import ReportsPage from "../pages/reports/ReportsPage";
@@ -39,7 +41,15 @@ export default function AppRouter() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
-      <Route path="/public" element={<PublicResultsPage />} />
+      <Route path="/public" element={<PublicPortalAccessPage />} />
+      <Route
+        path="/public/portal"
+        element={
+          <PublicPortalRoute>
+            <PublicResultsPage />
+          </PublicPortalRoute>
+        }
+      />
 
       <Route
         path="/"
@@ -86,7 +96,7 @@ export default function AppRouter() {
         <Route path="corrections" element={<CorrectionsPage />} />
         <Route path="results/sms" element={<BulkSmsPage />} />
         <Route path="results/marksheet" element={<MarksheetPrintPage />} />
-        <Route path="public" element={<PublicResultsPage />} />
+        <Route path="public" element={<Navigate to="/public/portal" replace />} />
         <Route path="my-results" element={<MyResultsPage />} />
       </Route>
 

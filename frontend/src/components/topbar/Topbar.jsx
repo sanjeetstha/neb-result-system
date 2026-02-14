@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import {
   Menu,
   Moon,
@@ -9,6 +10,7 @@ import {
   Bell,
   Sparkles,
   UserCog,
+  Users,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import {
@@ -21,9 +23,24 @@ import {
 } from "../ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 
+import { api } from "../../lib/api";
 import { toggleTheme, getTheme } from "../../lib/theme";
 import { useAppSettings } from "../../lib/appSettings";
 import { useProfileSettings } from "../../lib/profileSettings";
+
+function timeAgo(input) {
+  if (!input) return "";
+  const t = new Date(input).getTime();
+  if (!Number.isFinite(t)) return "";
+  const diff = Math.max(0, Date.now() - t);
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  return `${day}d ago`;
+}
 
 export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed, onLogout }) {
   const nav = useNavigate();
@@ -41,7 +58,15 @@ export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed,
   const profile = useProfileSettings(me);
   const avatarSrc = profile?.avatar_data_url || "";
   const canManageApp = ["SUPER_ADMIN", "ADMIN"].includes(me?.role);
-  const canQuickActions = ["SUPER_ADMIN", "ADMIN", "TEACHER"].includes(me?.role);
+  const canQuickActions = [
+    "SUPER_ADMIN",
+    "ADMIN",
+    "TEACHER",
+    "EXAM_HEAD",
+    "CAMPUS_CHIEF",
+    "ASSISTANT_CAMPUS_CHIEF",
+  ].includes(me?.role);
+  const isSuperAdmin = me?.role === "SUPER_ADMIN";
   const isActive = me?.is_active !== false;
   const topbarTitle =
     String(settings.topbar_title_np || "").trim() || "Result Management System";
@@ -69,6 +94,47 @@ export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed,
     10,
     Math.min(28, Number(settings.notice_text_size) || 13)
   );
+  const activeUsersQ = useQuery({
+    queryKey: ["users", "active", "topbar"],
+    enabled: isSuperAdmin,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+    retry: false,
+    queryFn: async () => {
+      const res = await api.get("/api/users/active", {
+        params: { window_min: 15, limit: 12 },
+      });
+      const users = Array.isArray(res.data?.users) ? res.data.users : [];
+      const count = Number.isFinite(Number(res.data?.count))
+        ? Number(res.data.count)
+        : users.length;
+      return { count, users };
+    },
+  });
+  const activeUsers = activeUsersQ.data?.users || [];
+  const activeUsersCount = Number(activeUsersQ.data?.count || 0);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const notificationsQ = useQuery({
+    queryKey: ["notifications", "topbar", me?.id, me?.role],
+    enabled: !!me?.id,
+    staleTime: 10_000,
+    refetchInterval: 20_000,
+    retry: false,
+    queryFn: async () => {
+      const res = await api.get("/api/notifications", {
+        params: { limit: 10 },
+      });
+      const notifications = Array.isArray(res.data?.notifications)
+        ? res.data.notifications
+        : [];
+      const count = Number.isFinite(Number(res.data?.count))
+        ? Number(res.data.count)
+        : notifications.length;
+      return { notifications, count };
+    },
+  });
+  const notifications = notificationsQ.data?.notifications || [];
+  const notificationCount = Number(notificationsQ.data?.count || 0);
 
   return (
     <header className={`sticky top-0 z-20 ${headerClass}`}>
@@ -141,6 +207,71 @@ export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed,
         <div className="flex-1" />
 
         <div className="ml-auto flex items-center gap-2">
+          {isSuperAdmin ? (
+            <div className="group relative">
+              <div
+                className={[
+                  "relative inline-flex h-9 items-center gap-1.5 rounded-full border px-2.5",
+                  "border-emerald-200 bg-emerald-50 text-emerald-700",
+                  "shadow-sm transition-all duration-200",
+                  "hover:-translate-y-0.5 hover:shadow-md",
+                ].join(" ")}
+                title="Active users (last 15 minutes)"
+              >
+                <Users
+                  className={[
+                    "h-4 w-4",
+                    activeUsersQ.isFetching ? "animate-pulse" : "",
+                  ].join(" ")}
+                />
+                <span className="text-xs font-semibold tabular-nums">
+                  {activeUsersCount}
+                </span>
+                <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border border-background bg-emerald-500" />
+              </div>
+
+              <div
+                className={[
+                  "pointer-events-none group-hover:pointer-events-auto absolute right-0 top-11 z-40 w-64 origin-top-right rounded-xl border bg-background/95 p-3 backdrop-blur",
+                  "shadow-[0_14px_30px_rgba(15,23,42,0.16)]",
+                  "opacity-0 translate-y-2 scale-95 transition-all duration-200",
+                  "group-hover:opacity-100 group-hover:translate-y-0 group-hover:scale-100",
+                ].join(" ")}
+              >
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="text-xs font-semibold text-foreground">
+                    Active Users
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">
+                    15 min window
+                  </div>
+                </div>
+                {activeUsers.length === 0 ? (
+                  <div className="text-xs text-muted-foreground">
+                    No active users right now.
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {activeUsers.map((u, idx) => (
+                      <span
+                        key={u.id}
+                        className={[
+                          "rounded-full border border-emerald-200 bg-emerald-100/70 px-2 py-1 text-[11px] font-medium text-emerald-800",
+                          "opacity-0 translate-x-2 transition-all duration-200",
+                          "group-hover:opacity-100 group-hover:translate-x-0",
+                        ].join(" ")}
+                        style={{ transitionDelay: `${idx * 35}ms` }}
+                        title={u.full_name || ""}
+                      >
+                        {u.first_name || u.full_name || "User"}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
+
           {canQuickActions ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -163,20 +294,79 @@ export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed,
             </DropdownMenu>
           ) : null}
           {settings.notifications_enabled ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="Notifications" className="text-foreground">
-                  <Bell className="h-5 w-5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-72">
-                <DropdownMenuLabel>Notifications</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <div className="px-3 py-2 text-sm text-muted-foreground">
-                  No new notifications
+            <div
+              className="relative"
+              onMouseEnter={() => setNotifOpen(true)}
+              onMouseLeave={() => setNotifOpen(false)}
+            >
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Notifications"
+                className="text-foreground relative"
+                onClick={() => setNotifOpen((v) => !v)}
+              >
+                <Bell className="h-5 w-5" />
+                {notificationCount > 0 ? (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] leading-[18px] font-semibold text-center shadow-md animate-in fade-in zoom-in-75 duration-200">
+                    {notificationCount > 99 ? "99+" : notificationCount}
+                  </span>
+                ) : null}
+              </Button>
+
+              <div
+                className={[
+                  "absolute right-0 top-11 z-40 w-80 rounded-xl border bg-background/95 p-2 backdrop-blur",
+                  "shadow-[0_14px_30px_rgba(15,23,42,0.16)]",
+                  "transition-all duration-150",
+                  notifOpen
+                    ? "opacity-100 translate-y-0 scale-100 pointer-events-auto"
+                    : "opacity-0 translate-y-1 scale-95 pointer-events-none",
+                ].join(" ")}
+              >
+                <div className="px-2 py-1.5 flex items-center justify-between">
+                  <div className="text-sm font-semibold">Notifications</div>
+                  <div className="text-xs text-muted-foreground">{notificationCount}</div>
                 </div>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                <div className="h-px bg-border my-1" />
+                {notificationsQ.isLoading ? (
+                  <div className="px-3 py-2 text-sm text-muted-foreground">Loading...</div>
+                ) : notifications.length === 0 ? (
+                  <div className="px-3 py-2 text-sm text-muted-foreground">
+                    No pending notifications
+                  </div>
+                ) : (
+                  <div className="max-h-80 overflow-auto">
+                    {notifications.map((n, idx) => (
+                      <button
+                        key={n.id || `${idx}`}
+                        className="w-full text-left rounded-md px-2 py-2 hover:bg-muted/60 transition-colors"
+                        onClick={() => {
+                          const path = String(n.action_path || "").trim();
+                          if (path) nav(path);
+                          setNotifOpen(false);
+                        }}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="text-sm font-medium leading-tight">
+                            {n.title || "Notification"}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground shrink-0">
+                            {timeAgo(n.created_at)}
+                          </span>
+                        </div>
+                        <div className="mt-0.5 text-xs text-muted-foreground leading-tight">
+                          {n.message || ""}
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-primary">
+                          {n.action_label || "Open task"}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           ) : null}
           {/* Animated Theme Toggle */}
           <Button

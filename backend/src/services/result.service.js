@@ -1,4 +1,8 @@
 const db = require("../db");
+const {
+  getCompulsorySubjectIds,
+  getSelectedOptionalSubjectIds,
+} = require("./subjectSelection.service");
 
 function round2(n) {
   return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
@@ -51,28 +55,9 @@ async function previewResult({ examId, enrollmentId }) {
 
   const { academic_year_id, class_id } = enrollRows[0];
 
-  const [[cg]] = await db.query(
-    `SELECT id FROM catalog_groups
-     WHERE academic_year_id <=> ? AND class_id <=> ? AND faculty_id IS NULL AND name='COMPULSORY'
-     LIMIT 1`,
-    [academic_year_id, class_id]
-  );
-
-  let subjectIds = [];
-  if (cg) {
-    const [cs] = await db.query(
-      `SELECT subject_id FROM catalog_group_subjects WHERE catalog_group_id=?`,
-      [cg.id]
-    );
-    subjectIds.push(...cs.map(x => x.subject_id));
-  }
-
-  const [ops] = await db.query(
-    `SELECT subject_id FROM student_optional_choices WHERE enrollment_id=?`,
-    [enrollmentId]
-  );
-  subjectIds.push(...ops.map(x => x.subject_id));
-  subjectIds = [...new Set(subjectIds)];
+  const compulsoryIds = await getCompulsorySubjectIds(academic_year_id, class_id);
+  const optionalIds = await getSelectedOptionalSubjectIds(enrollmentId);
+  const subjectIds = [...new Set([...compulsoryIds, ...optionalIds])];
 
   const [components] = await db.query(
     `SELECT sc.subject_id, s.name AS subject_name, sc.component_type, sc.component_code, sc.credit_hour

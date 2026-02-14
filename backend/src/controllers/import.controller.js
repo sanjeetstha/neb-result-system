@@ -1,5 +1,6 @@
 const XLSX = require("xlsx");
 const db = require("../db");
+const { MAX_OPTIONAL_SUBJECTS } = require("../services/subjectSelection.service");
 
 // Helper
 function toBool(v) {
@@ -17,6 +18,25 @@ function toNum(v) {
 
 function normHeader(v) {
   return String(v ?? "").trim().toLowerCase();
+}
+
+function normalizeIdentity(v) {
+  return String(v ?? "").trim().toUpperCase();
+}
+
+function formatImportErrorMessage(err) {
+  const msg = String(err?.message || "Import error");
+  const lower = msg.toLowerCase();
+  if (lower.includes("duplicate entry")) {
+    if (lower.includes("symbol_no")) {
+      return "Duplicate symbol number conflicts with existing student record";
+    }
+    if (lower.includes("regd_no")) {
+      return "Duplicate registration number conflicts with existing student record";
+    }
+    return "Duplicate value conflicts with existing records";
+  }
+  return msg;
 }
 
 function normalizeLabel(v) {
@@ -111,6 +131,7 @@ async function loadLedgerMaps(exam) {
 // POST /api/import/marks?exam_id=1
 async function importMarks(req, res) {
   const examId = Number(req.query.exam_id);
+  const requestedBatchId = req.query.batch_id ? Number(req.query.batch_id) : null;
   if (!examId) return res.status(400).json({ ok: false, message: "exam_id query param required" });
 
   if (!req.file?.buffer) {
@@ -138,9 +159,16 @@ async function importMarks(req, res) {
     return res.status(400).json({ ok: false, message: "No enabled component configs found for this exam" });
   }
 
-  // 3) Load symbol_no -> enrollment_id map (for this exam's campus/year/class/faculty)
+  // batch + faculty defaults for enrollment resolution
+  const [[ayRow]] = await db.query(
+    `SELECT batch_id FROM academic_years WHERE id=? LIMIT 1`,
+    [exam.academic_year_id]
+  );
+  const targetBatchId = requestedBatchId || ayRow?.batch_id || null;
+
+  // 3) Load symbol_no -> enrollment_id map (for this exam's campus/year/class/faculty/batch)
   let enrollSql =
-    `SELECT e.id AS enrollment_id, s.id AS student_id, s.symbol_no
+    `SELECT e.id AS enrollment_id, s.id AS student_id, s.symbol_no, s.regd_no
      FROM student_enrollments e
      JOIN students s ON s.id=e.student_id
      WHERE e.campus_id=? AND e.academic_year_id=? AND e.class_id=?`;
@@ -149,22 +177,30 @@ async function importMarks(req, res) {
     enrollSql += ` AND e.faculty_id=?`;
     enrollParams.push(exam.faculty_id);
   }
+  if (targetBatchId) {
+    enrollSql += ` AND e.batch_id=?`;
+    enrollParams.push(targetBatchId);
+  }
 
   const [enrollRows] = await db.query(enrollSql, enrollParams);
   const enrollmentBySymbol = new Map();
+  const enrollmentByRegd = new Map();
   for (const r of enrollRows) {
-    if (!r.symbol_no) continue;
-    enrollmentBySymbol.set(String(r.symbol_no).trim(), {
+    const payload = {
       enrollment_id: Number(r.enrollment_id),
       student_id: Number(r.student_id),
-    });
+      symbol_no: r.symbol_no ? String(r.symbol_no).trim() : "",
+      regd_no: r.regd_no ? String(r.regd_no).trim() : "",
+    };
+    const symbolKey = normalizeIdentity(r.symbol_no);
+    const regdKey = normalizeIdentity(r.regd_no);
+    if (symbolKey) enrollmentBySymbol.set(symbolKey, payload);
+    if (regdKey && !enrollmentByRegd.has(regdKey)) {
+      enrollmentByRegd.set(regdKey, payload);
+    }
   }
 
-  // batch + faculty defaults for auto-enrollment
-  const [[ayRow]] = await db.query(
-    `SELECT batch_id FROM academic_years WHERE id=? LIMIT 1`,
-    [exam.academic_year_id]
-  );
+  // faculty defaults for auto-enrollment
   let defaultFacultyId = exam.faculty_id || null;
   if (!defaultFacultyId) {
     const [[f]] = await db.query(`SELECT id FROM faculties ORDER BY id ASC LIMIT 1`);
@@ -197,6 +233,7 @@ async function importMarks(req, res) {
     if (headerRowIdx === -1) {
       const json = XLSX.utils.sheet_to_json(sheet, { defval: "" });
       totalRows = json.length;
+      const seenSimpleRows = new Map();
 
       // Expect columns: symbol_no, component_code, marks_obtained, is_absent
       for (let i = 0; i < json.length; i++) {
@@ -204,6 +241,7 @@ async function importMarks(req, res) {
         const rowNo = i + 2; // excel row number (header is row 1)
 
         const symbol_no = String(row.symbol_no ?? "").trim();
+        const symbolKey = normalizeIdentity(symbol_no);
         let component_code = String(row.component_code ?? "").trim();
         component_code = component_code.replace(/^0+(?=\d)/, "");
         const marks_obtained = toNum(row.marks_obtained);
@@ -216,7 +254,18 @@ async function importMarks(req, res) {
           continue;
         }
 
-        const enrollment = enrollmentBySymbol.get(symbol_no);
+        const dupKey = `${symbolKey}::${component_code}`;
+        if (seenSimpleRows.has(dupKey)) {
+          skipped++;
+          errors.push({
+            row: rowNo,
+            reason: `Duplicate symbol/component in file (first seen at row ${seenSimpleRows.get(dupKey)}); row skipped to avoid overwrite`,
+          });
+          continue;
+        }
+        seenSimpleRows.set(dupKey, rowNo);
+
+        const enrollment = enrollmentBySymbol.get(symbolKey);
         if (!enrollment) {
           skipped++;
           errors.push({
@@ -341,45 +390,101 @@ async function importMarks(req, res) {
         };
         return { group_name: group.name, code_idx: idx, mark_idx: idx + 1 };
       });
+      const seenLedgerSymbols = new Map();
+      const seenLedgerRegd = new Map();
 
       totalRows = Math.max(0, rows.length - (headerRowIdx + 2));
 
-      const ensureEnrollment = async ({ symbol_no, nameVal, regdVal, dobVal }) => {
-        let existing = enrollmentBySymbol.get(symbol_no);
+      const ensureEnrollment = async ({
+        symbol_no,
+        symbol_key,
+        nameVal,
+        regdVal,
+        regd_key,
+        dobVal,
+      }) => {
+        let existing = enrollmentBySymbol.get(symbol_key);
         if (existing) return existing;
+        if (regd_key) {
+          const regdExisting = enrollmentByRegd.get(regd_key);
+          if (regdExisting) return regdExisting;
+        }
 
         // try find student by symbol_no
-        const [[student]] = await conn.query(
-          `SELECT id FROM students WHERE symbol_no=? LIMIT 1`,
-          [symbol_no]
-        );
+        let student = null;
+        if (symbol_no) {
+          const [[bySymbol]] = await conn.query(
+            `SELECT id, regd_no FROM students WHERE symbol_no=? LIMIT 1`,
+            [symbol_no]
+          );
+          student = bySymbol || null;
+        }
         let studentId = student?.id || null;
+        let studentRegdNo = student?.regd_no ? String(student.regd_no).trim() : "";
+        if (!studentId && regdVal) {
+          const [[byRegd]] = await conn.query(
+            `SELECT id, symbol_no FROM students WHERE regd_no=? LIMIT 1`,
+            [regdVal]
+          );
+          if (byRegd?.id) {
+            return {
+              conflict: `Registration no ${regdVal} already used by symbol ${byRegd.symbol_no || "another student"}`,
+            };
+          }
+        }
+        if (studentId && regdVal && !studentRegdNo) {
+          const [[byRegdOwner]] = await conn.query(
+            `SELECT id FROM students WHERE regd_no=? LIMIT 1`,
+            [regdVal]
+          );
+          if (byRegdOwner?.id && Number(byRegdOwner.id) !== Number(studentId)) {
+            return {
+              conflict: `Registration no ${regdVal} already belongs to another student`,
+            };
+          }
+        }
         if (!studentId) {
           const [ins] = await conn.query(
             `INSERT INTO students (full_name, dob, symbol_no, regd_no)
              VALUES (?,?,?,?)`,
-            [nameVal || symbol_no, dobVal || null, symbol_no, regdVal || null]
+            [nameVal || regdVal || "Student", dobVal || null, symbol_no || null, regdVal || null]
           );
           studentId = ins.insertId;
+          studentRegdNo = regdVal || "";
         } else if (nameVal || regdVal || dobVal) {
           await conn.query(
             `UPDATE students
-             SET full_name=COALESCE(NULLIF(?,''), full_name),
-                 regd_no=COALESCE(NULLIF(?,''), regd_no),
-                 dob=COALESCE(?, dob)
+             SET full_name=CASE
+                              WHEN full_name IS NULL OR TRIM(full_name)='' THEN COALESCE(NULLIF(?,''), full_name)
+                              ELSE full_name
+                            END,
+                 regd_no=CASE
+                           WHEN regd_no IS NULL OR TRIM(regd_no)='' THEN COALESCE(NULLIF(?,''), regd_no)
+                           ELSE regd_no
+                         END,
+                 dob=COALESCE(dob, ?)
              WHERE id=?`,
             [nameVal, regdVal, dobVal, studentId]
           );
+          if (!studentRegdNo && regdVal) studentRegdNo = regdVal;
         }
 
         // ensure enrollment
         const [[enr]] = await conn.query(
-          `SELECT id FROM student_enrollments
+          `SELECT id, batch_id FROM student_enrollments
            WHERE student_id=? AND academic_year_id=? AND class_id=?
            LIMIT 1`,
           [studentId, exam.academic_year_id, exam.class_id]
         );
         let enrollmentId = enr?.id || null;
+        if (enrollmentId && targetBatchId && Number(enr.batch_id || 0) !== Number(targetBatchId)) {
+          await conn.query(
+            `UPDATE student_enrollments
+             SET batch_id=?
+             WHERE id=?`,
+            [targetBatchId, enrollmentId]
+          );
+        }
         if (!enrollmentId) {
           const [insE] = await conn.query(
             `INSERT INTO student_enrollments
@@ -391,145 +496,280 @@ async function importMarks(req, res) {
               exam.academic_year_id,
               exam.class_id,
               defaultFacultyId,
-              ayRow?.batch_id || null,
+              targetBatchId,
             ]
           );
           enrollmentId = insE.insertId;
         }
 
-        const payload = { enrollment_id: enrollmentId, student_id: studentId };
-        enrollmentBySymbol.set(symbol_no, payload);
+        const payload = {
+          enrollment_id: enrollmentId,
+          student_id: studentId,
+          symbol_no,
+          regd_no: studentRegdNo || regdVal || "",
+        };
+        if (symbol_key) {
+          enrollmentBySymbol.set(symbol_key, payload);
+        }
+        const finalRegdKey = normalizeIdentity(payload.regd_no);
+        if (finalRegdKey && !enrollmentByRegd.has(finalRegdKey)) {
+          enrollmentByRegd.set(finalRegdKey, payload);
+        }
         return payload;
       };
 
       for (let r = headerRowIdx + 2; r < rows.length; r++) {
         const row = rows[r] || [];
         const rowNo = r + 1;
+        await conn.query("SAVEPOINT row_import");
 
-        const symbol_no = String(row[symbolIdx] ?? "").trim();
-        if (!symbol_no) continue;
+        try {
+          let symbol_no = String(row[symbolIdx] ?? "").trim();
+          let symbol_key = normalizeIdentity(symbol_no);
+          const originalSymbol = symbol_no;
 
-        const nameVal = String(row[nameIdx] ?? "").trim();
-        const regdVal = regdIdx >= 0 ? String(row[regdIdx] ?? "").trim() : "";
+          const nameVal = String(row[nameIdx] ?? "").trim();
+          const regdVal = regdIdx >= 0 ? String(row[regdIdx] ?? "").trim() : "";
+          const regd_key = normalizeIdentity(regdVal);
 
-        const hasMarks =
-          compMappings.some((cm) => row[cm.idx] !== "" && row[cm.idx] != null) ||
-          optMappings.some((om) => row[om.code_idx] || row[om.mark_idx]);
-        if (!nameVal && !hasMarks) {
-          continue;
-        }
-
-        let dobVal = null;
-        if (dobIdx >= 0) {
-          const adIdx = sub[dobIdx + 1] && sub[dobIdx + 1].includes("ad") ? dobIdx + 1 : dobIdx;
-          dobVal = excelDateToISO(row[adIdx]);
-        }
-
-        let enrollment = enrollmentBySymbol.get(symbol_no);
-        if (!enrollment) {
-          enrollment = await ensureEnrollment({
-            symbol_no,
-            nameVal,
-            regdVal,
-            dobVal,
-          });
-        }
-
-        if (nameVal || regdVal || dobVal) {
-          await conn.query(
-            `UPDATE students
-             SET full_name=COALESCE(NULLIF(?,''), full_name),
-                 regd_no=COALESCE(NULLIF(?,''), regd_no),
-                 dob=COALESCE(?, dob)
-             WHERE id=?`,
-            [nameVal, regdVal, dobVal, enrollment.student_id]
-          );
-        }
-
-        const choices = [];
-        const optionalMarks = new Map();
-
-        for (const om of optMappings) {
-          let code = String(row[om.code_idx] ?? "").trim();
-          code = code.replace(/^0+(?=\d)/, "");
-          if (!code) continue;
-
-          const meta = optionalCodeMap.get(code);
-          if (!meta) {
-            skipped++;
-            errors.push({ row: rowNo, reason: `Unknown optional code ${code}` });
+          const hasMarks =
+            compMappings.some((cm) => row[cm.idx] !== "" && row[cm.idx] != null) ||
+            optMappings.some((om) => row[om.code_idx] || row[om.mark_idx]);
+          const hasRowContent = !!(nameVal || symbol_key || regd_key || hasMarks);
+          if (!hasRowContent) {
+            // Ignore fully empty rows in template (common in partially filled sheets).
+            await conn.query("RELEASE SAVEPOINT row_import");
             continue;
           }
-          choices.push({ group_name: om.group_name, subject_id: meta.subject_id });
 
-          const mk = toNum(row[om.mark_idx]);
-          if (mk != null) optionalMarks.set(code, mk);
-        }
+          // If symbol is duplicated in this file, blank it for this row and continue by regd mapping.
+          if (symbol_key && seenLedgerSymbols.has(symbol_key)) {
+            symbol_no = "";
+            symbol_key = "";
+            errors.push({
+              row: rowNo,
+              reason: `Duplicate symbol_no ${originalSymbol} in file; symbol cleared for this row and continued by registration`,
+            });
+          } else if (symbol_key) {
+            seenLedgerSymbols.set(symbol_key, rowNo);
+          }
 
-        if (choices.length) {
-          await conn.query(
-            `DELETE FROM student_optional_choices WHERE enrollment_id=?`,
-            [enrollment.enrollment_id]
-          );
-          for (const ch of choices) {
+          if (!symbol_key && !regd_key) {
+            skipped++;
+            errors.push({
+              row: rowNo,
+              reason: "Missing symbol_no and registration no; row skipped",
+            });
+            await conn.query("ROLLBACK TO SAVEPOINT row_import");
+            await conn.query("RELEASE SAVEPOINT row_import");
+            continue;
+          }
+
+          if (regd_key) {
+            if (seenLedgerRegd.has(regd_key)) {
+              skipped++;
+              errors.push({
+                row: rowNo,
+                reason: `Duplicate registration no ${regdVal} in file (first seen at row ${seenLedgerRegd.get(regd_key)}); row skipped to avoid overwrite`,
+              });
+              await conn.query("ROLLBACK TO SAVEPOINT row_import");
+              await conn.query("RELEASE SAVEPOINT row_import");
+              continue;
+            }
+            seenLedgerRegd.set(regd_key, rowNo);
+          }
+
+          if (!nameVal && !hasMarks) {
+            await conn.query("RELEASE SAVEPOINT row_import");
+            continue;
+          }
+
+          let dobVal = null;
+          if (dobIdx >= 0) {
+            const adIdx = sub[dobIdx + 1] && sub[dobIdx + 1].includes("ad") ? dobIdx + 1 : dobIdx;
+            dobVal = excelDateToISO(row[adIdx]);
+          }
+
+          let enrollment = symbol_key ? enrollmentBySymbol.get(symbol_key) : null;
+          if (!enrollment && regd_key) {
+            enrollment = enrollmentByRegd.get(regd_key) || null;
+          }
+          if (!enrollment) {
+            enrollment = await ensureEnrollment({
+              symbol_no,
+              symbol_key,
+              nameVal,
+              regdVal,
+              regd_key,
+              dobVal,
+            });
+          }
+          if (enrollment?.conflict || !enrollment?.enrollment_id) {
+            skipped++;
+            errors.push({
+              row: rowNo,
+              reason: enrollment?.conflict || "Unable to resolve enrollment for row",
+            });
+            await conn.query("ROLLBACK TO SAVEPOINT row_import");
+            await conn.query("RELEASE SAVEPOINT row_import");
+            continue;
+          }
+
+          if (symbol_key && !enrollmentBySymbol.has(symbol_key)) {
+            enrollmentBySymbol.set(symbol_key, enrollment);
+          }
+
+          if (regd_key) {
+            const regdOwner = enrollmentByRegd.get(regd_key);
+            if (regdOwner && Number(regdOwner.student_id) !== Number(enrollment.student_id)) {
+              skipped++;
+              errors.push({
+                row: rowNo,
+                reason: `Registration no ${regdVal} maps to a different student; row skipped`,
+              });
+              await conn.query("ROLLBACK TO SAVEPOINT row_import");
+              await conn.query("RELEASE SAVEPOINT row_import");
+              continue;
+            }
+            if (!regdOwner) enrollmentByRegd.set(regd_key, enrollment);
+          }
+
+          if (nameVal || regdVal || dobVal) {
             await conn.query(
-              `INSERT INTO student_optional_choices (enrollment_id, group_name, subject_id)
-               VALUES (?,?,?)`,
-              [enrollment.enrollment_id, ch.group_name, ch.subject_id]
+              `UPDATE students
+               SET full_name=CASE
+                                WHEN full_name IS NULL OR TRIM(full_name)='' THEN COALESCE(NULLIF(?,''), full_name)
+                                ELSE full_name
+                              END,
+                   regd_no=CASE
+                             WHEN regd_no IS NULL OR TRIM(regd_no)='' THEN COALESCE(NULLIF(?,''), regd_no)
+                             ELSE regd_no
+                           END,
+                   dob=COALESCE(dob, ?)
+               WHERE id=?`,
+              [nameVal, regdVal, dobVal, enrollment.student_id]
             );
           }
-        }
 
-        const markItems = [];
-        for (const cm of compMappings) {
-          const mk = toNum(row[cm.idx]);
-          if (mk == null) continue;
-          markItems.push({ component_code: cm.component_code, marks: mk });
-        }
-        for (const [code, mk] of optionalMarks.entries()) {
-          markItems.push({ component_code: code, marks: mk });
-        }
+          const choices = [];
+          const optionalMarks = new Map();
 
-        for (const item of markItems) {
-          const full = cfgByCode.get(item.component_code);
-          if (full == null) {
-            skipped++;
-            errors.push({
-              row: rowNo,
-              reason: `component_code ${item.component_code} not enabled/configured for this exam`,
-            });
-            continue;
-          }
-          if (item.marks < 0 || item.marks > full) {
-            skipped++;
-            errors.push({
-              row: rowNo,
-              reason: `marks ${item.marks} out of range (0..${full}) for code ${item.component_code}`,
-            });
-            continue;
+          for (const om of optMappings) {
+            let code = String(row[om.code_idx] ?? "").trim();
+            code = code.replace(/^0+(?=\d)/, "");
+            if (!code) continue;
+
+            const meta = optionalCodeMap.get(code);
+            if (!meta) {
+              skipped++;
+              errors.push({ row: rowNo, reason: `Unknown optional code ${code}` });
+              continue;
+            }
+            choices.push({ group_name: meta.group_name, subject_id: meta.subject_id });
+
+            const mk = toNum(row[om.mark_idx]);
+            if (mk != null) optionalMarks.set(code, mk);
           }
 
-          await conn.query(
-            `INSERT INTO marks
-               (exam_id, enrollment_id, component_code, marks_obtained, is_absent, entered_by, entered_at, updated_by, updated_at)
-             VALUES
-               (?,?,?,?,?,?,NOW(),?,NOW())
-             ON DUPLICATE KEY UPDATE
-               marks_obtained=VALUES(marks_obtained),
-               is_absent=VALUES(is_absent),
-               updated_by=VALUES(updated_by),
-               updated_at=NOW()`,
-            [
-              examId,
-              enrollment.enrollment_id,
-              item.component_code,
-              item.marks,
-              0,
-              req.user.uid,
-              req.user.uid,
-            ]
-          );
-          imported++;
+          if (choices.length) {
+            const normalizedChoices = [];
+            const seenGroups = new Set();
+            const seenSubjects = new Set();
+            for (const ch of choices) {
+              if (!ch?.group_name || !ch?.subject_id) continue;
+              if (seenGroups.has(ch.group_name) || seenSubjects.has(ch.subject_id)) continue;
+              seenGroups.add(ch.group_name);
+              seenSubjects.add(ch.subject_id);
+              normalizedChoices.push(ch);
+              if (normalizedChoices.length >= MAX_OPTIONAL_SUBJECTS) break;
+            }
+
+            const allowedSubjectIds = new Set(normalizedChoices.map((c) => Number(c.subject_id)));
+            for (const code of Array.from(optionalMarks.keys())) {
+              const meta = optionalCodeMap.get(String(code));
+              if (!meta?.subject_id || !allowedSubjectIds.has(Number(meta.subject_id))) {
+                optionalMarks.delete(code);
+              }
+            }
+
+            await conn.query(
+              `DELETE FROM student_optional_choices WHERE enrollment_id=?`,
+              [enrollment.enrollment_id]
+            );
+            for (const ch of normalizedChoices) {
+              await conn.query(
+                `INSERT INTO student_optional_choices (enrollment_id, group_name, subject_id)
+                 VALUES (?,?,?)`,
+                [enrollment.enrollment_id, ch.group_name, ch.subject_id]
+              );
+            }
+          }
+
+          const markItems = [];
+          for (const cm of compMappings) {
+            const mk = toNum(row[cm.idx]);
+            if (mk == null) continue;
+            markItems.push({ component_code: cm.component_code, marks: mk });
+          }
+          for (const [code, mk] of optionalMarks.entries()) {
+            markItems.push({ component_code: code, marks: mk });
+          }
+
+          for (const item of markItems) {
+            const full = cfgByCode.get(item.component_code);
+            if (full == null) {
+              skipped++;
+              errors.push({
+                row: rowNo,
+                reason: `component_code ${item.component_code} not enabled/configured for this exam`,
+              });
+              continue;
+            }
+            if (item.marks < 0 || item.marks > full) {
+              skipped++;
+              errors.push({
+                row: rowNo,
+                reason: `marks ${item.marks} out of range (0..${full}) for code ${item.component_code}`,
+              });
+              continue;
+            }
+
+            await conn.query(
+              `INSERT INTO marks
+                 (exam_id, enrollment_id, component_code, marks_obtained, is_absent, entered_by, entered_at, updated_by, updated_at)
+               VALUES
+                 (?,?,?,?,?,?,NOW(),?,NOW())
+               ON DUPLICATE KEY UPDATE
+                 marks_obtained=VALUES(marks_obtained),
+                 is_absent=VALUES(is_absent),
+                 updated_by=VALUES(updated_by),
+                 updated_at=NOW()`,
+              [
+                examId,
+                enrollment.enrollment_id,
+                item.component_code,
+                item.marks,
+                0,
+                req.user.uid,
+                req.user.uid,
+              ]
+            );
+            imported++;
+          }
+
+          await conn.query("RELEASE SAVEPOINT row_import");
+        } catch (rowErr) {
+          skipped++;
+          errors.push({
+            row: rowNo,
+            reason: formatImportErrorMessage(rowErr),
+          });
+          try {
+            await conn.query("ROLLBACK TO SAVEPOINT row_import");
+            await conn.query("RELEASE SAVEPOINT row_import");
+          } catch (_e) {
+            // ignore savepoint cleanup failures
+          }
         }
       }
     }
@@ -550,6 +790,7 @@ async function importMarks(req, res) {
   return res.json({
     ok: true,
     exam_id: examId,
+    batch_id: targetBatchId,
     sheet: sheetName,
     total_rows: totalRows,
     imported,

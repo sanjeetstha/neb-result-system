@@ -9,6 +9,8 @@ import {
   applyPresetToFlatComponents,
   buildComponentsPayloadFromFlat,
   flattenExamGroups,
+  getExamTermPolicy,
+  getPresetDefaults,
   isSpecialOptionalSubject,
   toNumberOrEmpty,
 } from "../../lib/examPresets";
@@ -27,12 +29,9 @@ export default function ExamComponentsPage() {
 
   const [search, setSearch] = useState("");
   const [presetKey, setPresetKey] = useState("FIRST_TERMINAL");
-  const [presetValues, setPresetValues] = useState({
-    full: EXAM_PRESETS.FIRST_TERMINAL.full,
-    optionalFull: EXAM_PRESETS.FIRST_TERMINAL.optionalFull,
-    enableIN: EXAM_PRESETS.FIRST_TERMINAL.enableIN,
-    inFull: EXAM_PRESETS.FIRST_TERMINAL.inFull,
-  });
+  const [presetValues, setPresetValues] = useState(() =>
+    getPresetDefaults("FIRST_TERMINAL", "")
+  );
 
   const examQ = useQuery({
     queryKey: ["exams", "components", examId],
@@ -43,15 +42,25 @@ export default function ExamComponentsPage() {
     },
   });
 
+  const exam = examQ.data?.exam || null;
+  const termPolicy = useMemo(
+    () => getExamTermPolicy(presetKey, exam?.class_name || ""),
+    [presetKey, exam?.class_name]
+  );
+
   useEffect(() => {
-    const p = EXAM_PRESETS[presetKey] || EXAM_PRESETS.FIRST_TERMINAL;
+    const p = getPresetDefaults(presetKey, exam?.class_name || "");
     setPresetValues({
       full: p.full,
       optionalFull: p.optionalFull,
+      pass: p.pass,
+      optionalPass: p.optionalPass,
       enableIN: p.enableIN,
+      enablePR: p.enablePR,
       inFull: p.inFull,
+      prFull: p.prFull,
     });
-  }, [presetKey]);
+  }, [presetKey, exam?.class_name]);
 
   useEffect(() => {
     if (!examQ.data?.groups) return;
@@ -60,7 +69,6 @@ export default function ExamComponentsPage() {
     baselineRef.current = JSON.parse(JSON.stringify(flat));
   }, [examQ.data]);
 
-  const exam = examQ.data?.exam || null;
   const isLocked = !!(exam?.is_locked || exam?.published_at);
 
   const filtered = useMemo(() => {
@@ -108,7 +116,15 @@ export default function ExamComponentsPage() {
     const full = toNumberOrEmpty(presetValues.full);
     const optionalFull = toNumberOrEmpty(presetValues.optionalFull);
     const inFull = toNumberOrEmpty(presetValues.inFull);
-    const enableIN = !!presetValues.enableIN;
+    const prFull = toNumberOrEmpty(presetValues.prFull);
+    const enableIN =
+      termPolicy.forceEnableIN !== null
+        ? !!termPolicy.forceEnableIN
+        : !!presetValues.enableIN;
+    const enablePR =
+      termPolicy.forceEnablePR !== null
+        ? !!termPolicy.forceEnablePR
+        : !!presetValues.enablePR;
 
     if (full === "" || optionalFull === "") {
       return toast.error("Full marks and optional full marks are required.");
@@ -118,7 +134,9 @@ export default function ExamComponentsPage() {
       full,
       optionalFull,
       enableIN,
+      enablePR,
       inFull,
+      prFull,
     }));
 
     toast.success("Preset applied");
@@ -210,7 +228,7 @@ export default function ExamComponentsPage() {
         <CardContent className="p-4 space-y-4">
           <div className="text-sm font-semibold">Terminal Preset</div>
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Preset</label>
               <select
@@ -262,42 +280,87 @@ export default function ExamComponentsPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3 items-end">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Include Practical/Internal (IN)</label>
-              <div className="flex items-center gap-3 h-10">
-                <input
-                  type="checkbox"
-                  checked={!!presetValues.enableIN}
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4 items-end">
+            {termPolicy.showINToggle || termPolicy.forceEnableIN === true ? (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Internal Full Marks</label>
+                <Input
+                  type="number"
+                  step="0.25"
+                  value={presetValues.inFull}
                   onChange={(e) =>
                     setPresetValues((p) => ({
                       ...p,
-                      enableIN: e.target.checked,
+                      inFull: toNumberOrEmpty(e.target.value),
                     }))
                   }
-                  disabled={isLocked}
-                  className="h-4 w-4"
+                  disabled={isLocked || termPolicy.forceEnableIN === false || !presetValues.enableIN}
                 />
-                <span className="text-sm text-muted-foreground">
-                  Enable IN / PR components
-                </span>
               </div>
-            </div>
+            ) : null}
+
+            {termPolicy.showPRToggle || termPolicy.forceEnablePR === true ? (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Practical Full Marks</label>
+                <Input
+                  type="number"
+                  step="0.25"
+                  value={presetValues.prFull}
+                  onChange={(e) =>
+                    setPresetValues((p) => ({
+                      ...p,
+                      prFull: toNumberOrEmpty(e.target.value),
+                    }))
+                  }
+                  disabled={isLocked || termPolicy.forceEnablePR === false || !presetValues.enablePR}
+                />
+              </div>
+            ) : null}
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">Practical/Internal Full Marks</label>
-              <Input
-                type="number"
-                step="0.25"
-                value={presetValues.inFull}
-                onChange={(e) =>
-                  setPresetValues((p) => ({
-                    ...p,
-                    inFull: toNumberOrEmpty(e.target.value),
-                  }))
-                }
-                disabled={isLocked || !presetValues.enableIN}
-              />
+              <label className="text-sm font-medium">Options</label>
+              <div className="flex h-10 items-center gap-3">
+                {termPolicy.showINToggle ? (
+                  <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={!!presetValues.enableIN}
+                      onChange={(e) =>
+                        setPresetValues((p) => ({
+                          ...p,
+                          enableIN: e.target.checked,
+                        }))
+                      }
+                      disabled={isLocked}
+                      className="h-4 w-4"
+                    />
+                    IN
+                  </label>
+                ) : null}
+                {termPolicy.showPRToggle ? (
+                  <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={!!presetValues.enablePR}
+                      onChange={(e) =>
+                        setPresetValues((p) => ({
+                          ...p,
+                          enablePR: e.target.checked,
+                        }))
+                      }
+                      disabled={isLocked}
+                      className="h-4 w-4"
+                    />
+                    PR
+                  </label>
+                ) : null}
+                {!termPolicy.showINToggle && termPolicy.forceEnableIN !== null ? (
+                  <Badge variant="outline">IN: {termPolicy.forceEnableIN ? "On" : "Off"}</Badge>
+                ) : null}
+                {!termPolicy.showPRToggle && termPolicy.forceEnablePR !== null ? (
+                  <Badge variant="outline">PR: {termPolicy.forceEnablePR ? "On" : "Off"}</Badge>
+                ) : null}
+              </div>
             </div>
 
             <div className="flex md:justify-end gap-2">
@@ -317,6 +380,10 @@ export default function ExamComponentsPage() {
               </Button>
             </div>
           </div>
+
+          {termPolicy.note ? (
+            <div className="text-xs text-muted-foreground">{termPolicy.note}</div>
+          ) : null}
 
           <div className="text-xs text-muted-foreground">
             Optional overrides apply to subjects containing{" "}

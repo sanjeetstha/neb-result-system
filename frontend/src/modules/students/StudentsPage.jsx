@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { api } from "../../lib/api";
 import { usePagination } from "../../lib/usePagination";
 import { useMe } from "../../lib/useMe";
-import { Trash2, Trash } from "lucide-react";
+import { Trash2, Trash, Plus, Layers, FolderPlus } from "lucide-react";
 
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -68,19 +68,48 @@ function buildBsDate(y, m, d) {
   return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
+function parseOptionalRank(name) {
+  const s = String(name || "").trim().toLowerCase();
+  const m = s.match(/(\d+)/);
+  if (m) return Number(m[1]);
+  if (s.includes("first")) return 1;
+  if (s.includes("second")) return 2;
+  if (s.includes("third")) return 3;
+  if (s.includes("fourth")) return 4;
+  return 999;
+}
+
+function isOptionalGroup(name) {
+  return /^\s*opt/i.test(String(name || ""));
+}
+
 function BsDateSelect({ value, onChange }) {
-  const parts = splitBsDate(value);
+  const [localParts, setLocalParts] = useState(() => splitBsDate(value));
+
+  useEffect(() => {
+    setLocalParts(splitBsDate(value));
+  }, [value]);
+
   const years = [];
   for (let y = 2000; y <= 2200; y += 1) years.push(String(y));
   const months = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"));
   const days = Array.from({ length: 32 }, (_, i) => String(i + 1).padStart(2, "0"));
 
+  const updatePart = (patch) => {
+    setLocalParts((prev) => {
+      const next = { ...prev, ...patch };
+      const nextValue = buildBsDate(next.y, next.m, next.d);
+      onChange(nextValue);
+      return next;
+    });
+  };
+
   return (
     <div className="grid grid-cols-3 gap-2">
       <select
         className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-        value={parts.y}
-        onChange={(e) => onChange(buildBsDate(e.target.value, parts.m, parts.d))}
+        value={localParts.y}
+        onChange={(e) => updatePart({ y: e.target.value })}
       >
         <option value="">Year</option>
         {years.map((y) => (
@@ -91,8 +120,8 @@ function BsDateSelect({ value, onChange }) {
       </select>
       <select
         className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-        value={parts.m}
-        onChange={(e) => onChange(buildBsDate(parts.y, e.target.value, parts.d))}
+        value={localParts.m}
+        onChange={(e) => updatePart({ m: e.target.value })}
       >
         <option value="">Month</option>
         {months.map((m) => (
@@ -103,8 +132,8 @@ function BsDateSelect({ value, onChange }) {
       </select>
       <select
         className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-        value={parts.d}
-        onChange={(e) => onChange(buildBsDate(parts.y, parts.m, e.target.value))}
+        value={localParts.d}
+        onChange={(e) => updatePart({ d: e.target.value })}
       >
         <option value="">Day</option>
         {days.map((d) => (
@@ -176,6 +205,16 @@ export default function StudentsPage() {
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteMode, setDeleteMode] = useState("batch"); // batch | selected | single
   const [deleteTargets, setDeleteTargets] = useState([]);
+  const [deleteBatchOpen, setDeleteBatchOpen] = useState(false);
+  const [deleteBatchPassword, setDeleteBatchPassword] = useState("");
+  const [createBatchOpen, setCreateBatchOpen] = useState(false);
+  const [createSectionOpen, setCreateSectionOpen] = useState(false);
+  const [newBatch, setNewBatch] = useState({ name: "", year_bs: "" });
+  const [newSection, setNewSection] = useState({
+    name: "",
+    campus_id: "",
+    faculty_id: "",
+  });
 
   const [selectedIds, setSelectedIds] = useState(new Set());
 
@@ -233,6 +272,36 @@ export default function StudentsPage() {
       label: c.name ?? `Class #${c.id ?? c.class_id}`,
     }));
   }, [classesQ.data]);
+
+  const campusesQ = useQuery({
+    queryKey: ["masters", "campuses"],
+    queryFn: async () => {
+      const res = await api.get("/api/masters/campuses");
+      const data = res.data?.campuses ?? res.data?.data ?? [];
+      return Array.isArray(data) ? data : [];
+    },
+    staleTime: 30_000,
+  });
+
+  const facultiesQ = useQuery({
+    queryKey: ["masters", "faculties"],
+    queryFn: async () => {
+      const res = await api.get("/api/masters/faculties");
+      const data = res.data?.faculties ?? res.data?.data ?? [];
+      return Array.isArray(data) ? data : [];
+    },
+    staleTime: 30_000,
+  });
+
+  const academicYearsQ = useQuery({
+    queryKey: ["masters", "academic-years"],
+    queryFn: async () => {
+      const res = await api.get("/api/masters/academic-years");
+      const data = res.data?.academic_years ?? res.data?.data ?? [];
+      return Array.isArray(data) ? data : [];
+    },
+    staleTime: 30_000,
+  });
 
   // load students for selected batch + class
   const studentsQ = useQuery({
@@ -334,8 +403,9 @@ export default function StudentsPage() {
     mutationFn: async () => {
       if (!profileEnrollmentId) throw new Error("Missing enrollment id");
 
+      const allowedGroups = new Set(optionalGroups.map((g) => g.group_name));
       const choices = Object.entries(optDraft)
-        .filter(([, sid]) => Number(sid) > 0)
+        .filter(([group_name, sid]) => allowedGroups.has(group_name) && Number(sid) > 0)
         .map(([group_name, subject_id]) => ({
           group_name,
           subject_id: Number(subject_id),
@@ -355,6 +425,94 @@ export default function StudentsPage() {
     },
     onError: (err) => {
       toast.error(err?.response?.data?.message || err.message || "Failed to save optionals");
+    },
+  });
+
+  const createBatchMut = useMutation({
+    mutationFn: async () => {
+      const name = norm(newBatch.name);
+      const year_bs = norm(newBatch.year_bs);
+      if (!name) throw new Error("Batch name is required");
+      const payload = { name, year_bs: year_bs || null };
+      const res = await api.post("/api/masters/batches", payload);
+      return res.data;
+    },
+    onSuccess: async (data) => {
+      toast.success("Batch created");
+      const createdId = String(data?.id || "");
+      setCreateBatchOpen(false);
+      setNewBatch({ name: "", year_bs: "" });
+      await qc.invalidateQueries({ queryKey: ["masters", "batches"] });
+      if (createdId) {
+        setBatchId(createdId);
+        setForm((p) => ({ ...p, batch_id: createdId }));
+      }
+    },
+    onError: (e) => {
+      toast.error(e?.response?.data?.message || e.message || "Failed to create batch");
+    },
+  });
+
+  const deleteBatchMut = useMutation({
+    mutationFn: async () => {
+      if (!batchId) throw new Error("Select batch first");
+      if (!deleteBatchPassword) throw new Error("Password is required");
+      const res = await api.delete(`/api/masters/batches/${batchId}`, {
+        data: { password: deleteBatchPassword },
+      });
+      return res.data;
+    },
+    onSuccess: async (data) => {
+      toast.success(data?.message || "Batch removed");
+      setDeleteBatchOpen(false);
+      setDeleteBatchPassword("");
+      setBatchId("");
+      setClassId("");
+      setForm((p) => ({ ...p, batch_id: "", class_id: "" }));
+      await qc.invalidateQueries({ queryKey: ["masters", "batches"] });
+      await qc.invalidateQueries({ queryKey: ["students", "list"] });
+    },
+    onError: (e) => {
+      toast.error(e?.response?.data?.message || e.message || "Failed to remove batch");
+    },
+  });
+
+  const createSectionMut = useMutation({
+    mutationFn: async () => {
+      if (!batchId) throw new Error("Select batch first");
+      if (!classId) throw new Error("Select class first");
+      const sectionName = norm(newSection.name);
+      if (!sectionName) throw new Error("Section name is required");
+      const campus_id = Number(newSection.campus_id || 0);
+      const faculty_id = Number(newSection.faculty_id || 0);
+      if (!campus_id || !faculty_id) {
+        throw new Error("Campus and faculty are required");
+      }
+
+      const ay = (academicYearsQ.data || []).find(
+        (x) => String(x.batch_id || "") === String(batchId)
+      );
+      if (!ay?.id) {
+        throw new Error("No academic year linked with this batch");
+      }
+
+      const payload = {
+        campus_id,
+        academic_year_id: Number(ay.id),
+        class_id: Number(classId),
+        faculty_id,
+        name: sectionName,
+      };
+      const res = await api.post("/api/masters/sections", payload);
+      return res.data;
+    },
+    onSuccess: () => {
+      toast.success("Section created");
+      setCreateSectionOpen(false);
+      setNewSection((p) => ({ ...p, name: "" }));
+    },
+    onError: (e) => {
+      toast.error(e?.response?.data?.message || e.message || "Failed to create section");
     },
   });
 
@@ -461,6 +619,7 @@ export default function StudentsPage() {
     const normalizedFromCatalog = groups
       .map((g) => {
         const group_name = g.group_name || g.name || g.title || "";
+        if (!isOptionalGroup(group_name)) return null;
         const subs = g.subjects || g.items || g.subject_list || [];
         const subjects = (Array.isArray(subs) ? subs : []).map((s) => ({
           id: s.id ?? s.subject_id,
@@ -472,7 +631,10 @@ export default function StudentsPage() {
       })
       .filter(Boolean);
 
-    if (normalizedFromCatalog.length > 0) return normalizedFromCatalog;
+    if (normalizedFromCatalog.length > 0) {
+      return normalizedFromCatalog
+        .sort((a, b) => parseOptionalRank(a.group_name) - parseOptionalRank(b.group_name));
+    }
 
     const choiceGroups = (profileQ.data?.optional_choices || [])
       .map((c) => c.group_name)
@@ -486,13 +648,49 @@ export default function StudentsPage() {
       code: s.components?.[0]?.component_code || "",
     }));
 
-    return uniqueGroups.map((group_name) => ({
-      group_name,
-      subjects: fallbackSubjects,
-    }));
+    return uniqueGroups
+      .filter((group_name) => isOptionalGroup(group_name))
+      .sort((a, b) => parseOptionalRank(a) - parseOptionalRank(b))
+      .map((group_name) => ({
+        group_name,
+        subjects: fallbackSubjects,
+      }));
   }, [catalogQ.data, profileQ.data, profileQ.data?.optional_choices]);
 
+  const selectedOptionalCount = useMemo(() => {
+    return optionalGroups.reduce(
+      (count, g) => count + (Number(optDraft[g.group_name] || 0) > 0 ? 1 : 0),
+      0
+    );
+  }, [optionalGroups, optDraft]);
+
+  const visibleOptionalGroups = useMemo(() => {
+    if (selectedOptionalCount < 3) return optionalGroups;
+    return optionalGroups.filter((g) => Number(optDraft[g.group_name] || 0) > 0);
+  }, [optionalGroups, optDraft, selectedOptionalCount]);
+
   const enrollment = profileQ.data?.enrollment;
+
+  const campusOptions = useMemo(() => {
+    const arr = campusesQ.data || [];
+    return arr.map((c) => ({
+      value: String(c.id ?? ""),
+      label: c.name || `Campus #${c.id}`,
+    }));
+  }, [campusesQ.data]);
+
+  const facultyOptions = useMemo(() => {
+    const arr = facultiesQ.data || [];
+    return arr.map((f) => ({
+      value: String(f.id ?? ""),
+      label: f.name || `Faculty #${f.id}`,
+    }));
+  }, [facultiesQ.data]);
+
+  const currentBatch = useMemo(
+    () => (batchesQ.data || []).find((b) => String(b.id) === String(batchId)),
+    [batchesQ.data, batchId]
+  );
 
   const openEdit = (r) => {
     setEditingStudentId(r.id);
@@ -538,7 +736,7 @@ export default function StudentsPage() {
             placeholder={classesQ.isLoading ? "Loading classes..." : "Select class"}
           />
 
-          <div className="md:col-span-1 flex items-end justify-between gap-2">
+          <div className="md:col-span-1 flex flex-wrap items-end justify-between gap-2">
             <div className="text-xs text-muted-foreground">
               {batchId && classId
                 ? studentsQ.isLoading
@@ -547,7 +745,75 @@ export default function StudentsPage() {
                 : "Choose a batch and class to load students."}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {(me?.role === "SUPER_ADMIN" || me?.role === "ADMIN") ? (
+                <>
+                  <div className="relative group">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      aria-label="Create custom batch"
+                      onClick={() => {
+                        const y = currentBatch?.year_bs ? String(currentBatch.year_bs) : "";
+                        setNewBatch({
+                          name: "",
+                          year_bs: y,
+                        });
+                        setCreateBatchOpen(true);
+                      }}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                    <span className="pointer-events-none absolute -top-9 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-foreground px-2 py-1 text-[10px] text-background opacity-0 shadow group-hover:opacity-100">
+                      Create custom batch
+                    </span>
+                  </div>
+                  <div className="relative group">
+                    <Button
+                      variant="destructive"
+                      size="icon"
+                      aria-label="Remove selected batch"
+                      disabled={!batchId || deleteBatchMut.isPending}
+                      onClick={() => {
+                        if (!batchId) return toast.error("Select batch first");
+                        setDeleteBatchPassword("");
+                        setDeleteBatchOpen(true);
+                      }}
+                    >
+                      <Layers className="h-4 w-4" />
+                    </Button>
+                    <span className="pointer-events-none absolute -top-9 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-foreground px-2 py-1 text-[10px] text-background opacity-0 shadow group-hover:opacity-100">
+                      Remove selected batch
+                    </span>
+                  </div>
+                  <div className="relative group">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      aria-label="Create section"
+                      disabled={!batchId || !classId || createSectionMut.isPending}
+                      onClick={() => {
+                        if (!batchId || !classId) {
+                          toast.error("Select batch and class first");
+                          return;
+                        }
+                        setNewSection((p) => ({
+                          ...p,
+                          name: "",
+                          campus_id: p.campus_id || String(campusOptions[0]?.value || ""),
+                          faculty_id: p.faculty_id || String(facultyOptions[0]?.value || ""),
+                        }));
+                        setCreateSectionOpen(true);
+                      }}
+                    >
+                      <FolderPlus className="h-4 w-4" />
+                    </Button>
+                    <span className="pointer-events-none absolute -top-9 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-foreground px-2 py-1 text-[10px] text-background opacity-0 shadow group-hover:opacity-100">
+                      Create section for this batch/class
+                    </span>
+                  </div>
+                </>
+              ) : null}
               {me?.role === "SUPER_ADMIN" || me?.role === "ADMIN" ? (
                 <>
                   <div className="relative group">
@@ -945,14 +1211,22 @@ export default function StudentsPage() {
                   <div className="text-sm text-muted-foreground mt-2">No optional groups found.</div>
                 ) : (
                   <div className="mt-3 space-y-3">
-                    {optionalGroups.map((g) => (
+                    {visibleOptionalGroups.map((g) => (
                       <div key={g.group_name} className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         <div className="text-sm font-medium">{g.group_name}</div>
                         <select
                           className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                           value={String(optDraft[g.group_name] || "")}
                           onChange={(e) => {
-                            setOptDraft((p) => ({ ...p, [g.group_name]: e.target.value }));
+                            const nextValue = e.target.value;
+                            setOptDraft((p) => {
+                              const prevValue = Number(p[g.group_name] || 0);
+                              if (nextValue && !prevValue && selectedOptionalCount >= 3) {
+                                toast.error("Only 3 optional subjects can be selected");
+                                return p;
+                              }
+                              return { ...p, [g.group_name]: nextValue };
+                            });
                             setOptDirty(true);
                           }}
                         >
@@ -979,6 +1253,120 @@ export default function StudentsPage() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={createBatchOpen} onOpenChange={setCreateBatchOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create custom batch</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Batch name</label>
+              <Input
+                placeholder="e.g., Class 12 Batch 2082"
+                value={newBatch.name}
+                onChange={(e) => setNewBatch((p) => ({ ...p, name: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Year (BS)</label>
+              <Input
+                placeholder="e.g., 2082"
+                value={newBatch.year_bs}
+                onChange={(e) => setNewBatch((p) => ({ ...p, year_bs: e.target.value }))}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setCreateBatchOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={() => createBatchMut.mutate()} disabled={createBatchMut.isPending}>
+                {createBatchMut.isPending ? "Saving..." : "Save Batch"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={createSectionOpen} onOpenChange={setCreateSectionOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create section</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="text-xs text-muted-foreground">
+              Batch: {currentBatch?.name || "—"} {currentBatch?.year_bs ? `(${currentBatch.year_bs})` : ""}
+              {" • "}
+              Class: {classOptions.find((x) => x.value === classId)?.label || "—"}
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Section name</label>
+              <Input
+                placeholder="e.g., Section A"
+                value={newSection.name}
+                onChange={(e) => setNewSection((p) => ({ ...p, name: e.target.value }))}
+              />
+            </div>
+            <Select
+              label="Campus"
+              value={newSection.campus_id}
+              onChange={(v) => setNewSection((p) => ({ ...p, campus_id: v }))}
+              options={campusOptions}
+              placeholder={campusesQ.isLoading ? "Loading campuses..." : "Select campus"}
+            />
+            <Select
+              label="Faculty"
+              value={newSection.faculty_id}
+              onChange={(v) => setNewSection((p) => ({ ...p, faculty_id: v }))}
+              options={facultyOptions}
+              placeholder={facultiesQ.isLoading ? "Loading faculties..." : "Select faculty"}
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setCreateSectionOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={() => createSectionMut.mutate()} disabled={createSectionMut.isPending}>
+                {createSectionMut.isPending ? "Saving..." : "Save Section"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteBatchOpen} onOpenChange={setDeleteBatchOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove selected batch</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="text-sm text-muted-foreground">
+              This removes the selected batch from master data. Batch should have no active students.
+              Academic year links will be detached automatically.
+            </div>
+            <div className="rounded-md border p-2 text-xs">
+              Selected: {currentBatch?.name || "—"} {currentBatch?.year_bs ? `(${currentBatch.year_bs})` : ""}
+            </div>
+            <Input
+              type="password"
+              placeholder="Password"
+              value={deleteBatchPassword}
+              onChange={(e) => setDeleteBatchPassword(e.target.value)}
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDeleteBatchOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => deleteBatchMut.mutate()}
+                disabled={!deleteBatchPassword || deleteBatchMut.isPending}
+              >
+                {deleteBatchMut.isPending ? "Removing..." : "Remove Batch"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

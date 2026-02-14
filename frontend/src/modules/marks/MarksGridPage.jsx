@@ -1,8 +1,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { api } from "../../lib/api";
+import { useMe } from "../../lib/useMe";
 import { usePagination } from "../../lib/usePagination";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -10,14 +12,7 @@ import { Badge } from "../../components/ui/badge";
 import { Card, CardContent } from "../../components/ui/card";
 import { Separator } from "../../components/ui/separator";
 import PaginationBar from "../../components/ui/pagination-bar";
-
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "../../components/ui/dialog";
+import ResultPreviewDialog from "../../components/results/ResultPreviewDialog";
 
 function pad4(code) {
   const s = String(code ?? "").trim();
@@ -40,6 +35,26 @@ function formatGpa(v) {
   return n.toFixed(2);
 }
 
+function parseOptionalRank(name) {
+  const s = String(name || "").trim().toLowerCase();
+  const m = s.match(/(\d+)/);
+  if (m) return Number(m[1]);
+  if (s.includes("first")) return 1;
+  if (s.includes("second")) return 2;
+  if (s.includes("third")) return 3;
+  if (s.includes("fourth")) return 4;
+  return 999;
+}
+
+function workflowBadgeVariant(status) {
+  const s = String(status || "").toUpperCase();
+  if (s === "PUBLISHED") return "default";
+  if (s === "APPROVED") return "secondary";
+  if (s === "VERIFIED") return "outline";
+  if (s === "SUBMITTED") return "outline";
+  return "outline";
+}
+
 function Select({ label, value, onChange, options, placeholder }) {
   return (
     <div className="space-y-2">
@@ -60,18 +75,9 @@ function Select({ label, value, onChange, options, placeholder }) {
   );
 }
 
-function PreviewKV({ label, value }) {
-  return (
-    <div className="flex items-start justify-between gap-3 py-1">
-      <div className="text-sm text-muted-foreground">{label}</div>
-      <div className="text-sm font-medium text-right break-words max-w-[65%]">
-        {value == null || value === "" ? "—" : String(value)}
-      </div>
-    </div>
-  );
-}
-
 export default function MarksGridPage() {
+  const location = useLocation();
+  const { data: me } = useMe();
   const [examId, setExamId] = useState("");
   const [batchId, setBatchId] = useState("");
   const [viewMode, setViewMode] = useState("ledger");
@@ -86,6 +92,7 @@ export default function MarksGridPage() {
   const [dirtyByEnrollment, setDirtyByEnrollment] = useState({});
   const [studentEdits, setStudentEdits] = useState({});
   const studentBaselineRef = useRef({});
+  const optionalBaselineRef = useRef({});
 
   const [savingAll, setSavingAll] = useState(false);
   const [saveAllProgress, setSaveAllProgress] = useState({ done: 0, total: 0 });
@@ -118,6 +125,51 @@ export default function MarksGridPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewStudent, setPreviewStudent] = useState(null);
   const [previewData, setPreviewData] = useState(null);
+  const [previewError, setPreviewError] = useState("");
+  const canEditMarks = ["SUPER_ADMIN", "ADMIN", "TEACHER"].includes(me?.role);
+  const canGenerateSnapshots = ["SUPER_ADMIN", "ADMIN"].includes(me?.role);
+  const canSubmit = ["SUPER_ADMIN", "ADMIN", "TEACHER"].includes(me?.role);
+  const canVerify = ["SUPER_ADMIN", "EXAM_HEAD"].includes(me?.role);
+  const canApprove = ["SUPER_ADMIN", "CAMPUS_CHIEF", "ASSISTANT_CAMPUS_CHIEF"].includes(me?.role);
+  const canPublish = ["SUPER_ADMIN", "ADMIN"].includes(me?.role);
+
+  const importErrors = useMemo(() => {
+    const arr = importSummary?.errors;
+    return Array.isArray(arr) ? arr : [];
+  }, [importSummary]);
+
+  // Allows opening direct task links from notifications
+  useEffect(() => {
+    const q = new URLSearchParams(location.search || "");
+    const examFromQuery = String(q.get("exam_id") || "").trim();
+    const batchFromQuery = String(q.get("batch_id") || "").trim();
+    if (examFromQuery && examFromQuery !== String(examId || "")) {
+      setExamId(examFromQuery);
+    }
+    if (batchFromQuery && batchFromQuery !== String(batchId || "")) {
+      setBatchId(batchFromQuery);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
+
+  const downloadImportErrors = () => {
+    if (!importErrors.length) return;
+    const lines = ["row,reason"];
+    for (const err of importErrors) {
+      const row = String(err?.row ?? "").replace(/"/g, "\"\"");
+      const reason = String(err?.reason ?? "").replace(/"/g, "\"\"");
+      lines.push(`"${row}","${reason}"`);
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `bulk-grid-import-errors-exam-${examId || "unknown"}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
 
   // ---------------- EXAMS ----------------
   const examsQ = useQuery({
@@ -152,6 +204,18 @@ export default function MarksGridPage() {
     selectedExam?.is_published ||
     selectedExam?.is_locked
   );
+  const workflowQ = useQuery({
+    queryKey: ["results", "workflow", examId],
+    enabled: !!examId,
+    queryFn: async () => {
+      const res = await api.get(`/api/results/${examId}/workflow`);
+      return res.data?.workflow || {};
+    },
+    staleTime: 5_000,
+  });
+  const workflowStatus = String(
+    workflowQ.data?.status || (isLocked ? "PUBLISHED" : "DRAFT")
+  ).toUpperCase();
 
   // ---------------- EXAM COMPONENT GROUPS (for Ledger view) ----------------
   const examComponentsQ = useQuery({
@@ -211,7 +275,9 @@ export default function MarksGridPage() {
             };
           })
           .filter(Boolean),
-      }));
+      }))
+      .sort((a, b) => parseOptionalRank(a.name) - parseOptionalRank(b.name))
+      .slice(0, 3);
   }, [examGroups]);
 
   const optionalCodeMap = useMemo(() => {
@@ -313,6 +379,7 @@ export default function MarksGridPage() {
     setPreviewOpen(false);
     setPreviewStudent(null);
     setPreviewData(null);
+    setPreviewError("");
     setStudentQuery("");
     setColumnQuery("");
     setColumnTypes({ TH: true, IN: true, PR: true });
@@ -320,13 +387,15 @@ export default function MarksGridPage() {
     setImportSummary(null);
     baselineRef.current = {};
     studentBaselineRef.current = {};
+    optionalBaselineRef.current = {};
   }, [examId, batchId]);
 
   // ---------------- LOAD LEDGERS FOR ALL STUDENTS ----------------
   const canLoad = !!examId && !!batchId && students.length > 0;
 
-  const loadLedgers = async () => {
-    if (!canLoad) return;
+  const loadLedgers = async (studentsOverride = null) => {
+    const targetStudents = Array.isArray(studentsOverride) ? studentsOverride : students;
+    if (!examId || !batchId || targetStudents.length === 0) return;
     if (compulsoryCols.length === 0 && optionalGroups.length === 0) {
       toast.error("No subject catalog configured for this class. Configure subjects first.");
       return;
@@ -337,9 +406,10 @@ export default function MarksGridPage() {
 
       const ledgers = {};
       const marksInit = {};
+      const optInit = {};
       const errors = [];
 
-      for (const s of students) {
+      for (const s of targetStudents) {
         const enrollment_id = s.enrollment_id;
         try {
           const res = await api.get(`/api/marks/${examId}/enrollments/${enrollment_id}`);
@@ -354,6 +424,31 @@ export default function MarksGridPage() {
             rowMarks[code] = item.marks_obtained == null ? "" : String(item.marks_obtained);
           }
           marksInit[enrollment_id] = rowMarks;
+
+          const optRow = {};
+          const canonicalChoiceCodes = Array.isArray(res.data?.optional_choice_codes)
+            ? res.data.optional_choice_codes
+            : [];
+          for (const ch of canonicalChoiceCodes) {
+            const groupName = String(ch?.group_name || "").trim();
+            const code = String(ch?.component_code || "").trim();
+            if (groupName && code && !optRow[groupName]) {
+              optRow[groupName] = code;
+            }
+          }
+
+          // Fallback: infer from ledger rows only when canonical data is unavailable.
+          if (Object.keys(optRow).length === 0) {
+            for (const item of ledger || []) {
+              if (!item?.enabled_in_exam) continue;
+              if (String(item.component_type || "").toUpperCase() !== "TH") continue;
+              const groupName = subjectIdToOptionalGroup.get(item.subject_id);
+              if (groupName && !optRow[groupName]) {
+                optRow[groupName] = String(item.component_code || "");
+              }
+            }
+          }
+          optInit[enrollment_id] = optRow;
         } catch (e) {
           errors.push({
             enrollment_id,
@@ -363,31 +458,18 @@ export default function MarksGridPage() {
           });
           ledgers[enrollment_id] = [];
           marksInit[enrollment_id] = {};
+          optInit[enrollment_id] = {};
         }
       }
 
       setLedgerByEnrollment(ledgers);
       setMarksByEnrollment(marksInit);
+      setOptionalByEnrollment(optInit);
+      optionalBaselineRef.current = JSON.parse(JSON.stringify(optInit));
 
       // ✅ set baseline for dirty tracking
       baselineRef.current = JSON.parse(JSON.stringify(marksInit));
       setDirtyByEnrollment({});
-
-      // ✅ optional code defaults (from existing ledger choices)
-      const optInit = {};
-      for (const [enrollment_id, ledger] of Object.entries(ledgers)) {
-        const optRow = {};
-        for (const item of ledger || []) {
-          if (!item?.enabled_in_exam) continue;
-          if (String(item.component_type || "").toUpperCase() !== "TH") continue;
-          const groupName = subjectIdToOptionalGroup.get(item.subject_id);
-          if (groupName && !optRow[groupName]) {
-            optRow[groupName] = String(item.component_code || "");
-          }
-        }
-        optInit[enrollment_id] = optRow;
-      }
-      setOptionalByEnrollment(optInit);
 
       if (errors.length === 0) {
         toast.success("Ledgers loaded for batch");
@@ -404,9 +486,10 @@ export default function MarksGridPage() {
 
   useEffect(() => {
     if (!canLoad) return;
+    if (examComponentsQ.isLoading) return;
     loadLedgers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canLoad]);
+  }, [canLoad, examId, batchId, studentsQ.dataUpdatedAt, examComponentsQ.dataUpdatedAt, examComponentsQ.isLoading]);
 
   const loadGrades = async () => {
     if (!canLoad) return;
@@ -484,26 +567,7 @@ export default function MarksGridPage() {
     if (!canLoad) return;
     loadGrades();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, canLoad]);
-
-  useEffect(() => {
-    if (!Object.keys(ledgerByEnrollment || {}).length) return;
-    if (!subjectIdToOptionalGroup || subjectIdToOptionalGroup.size === 0) return;
-    const optInit = {};
-    for (const [enrollment_id, ledger] of Object.entries(ledgerByEnrollment)) {
-      const optRow = {};
-      for (const item of ledger || []) {
-        if (!item?.enabled_in_exam) continue;
-        if (String(item.component_type || "").toUpperCase() !== "TH") continue;
-        const groupName = subjectIdToOptionalGroup.get(item.subject_id);
-        if (groupName && !optRow[groupName]) {
-          optRow[groupName] = String(item.component_code || "");
-        }
-      }
-      optInit[enrollment_id] = optRow;
-    }
-    setOptionalByEnrollment(optInit);
-  }, [ledgerByEnrollment, subjectIdToOptionalGroup]);
+  }, [viewMode, canLoad, examId, batchId, studentsQ.dataUpdatedAt]);
 
   // ---------------- BUILD FLAT COLUMNS ----------------
   const columns = useMemo(() => {
@@ -628,18 +692,8 @@ export default function MarksGridPage() {
     return false;
   };
 
-  const isLedgerRowDirty = (enrollment_id) => {
-    if (isRowDirty(enrollment_id)) return true;
-    if (studentNeedsUpdate(enrollment_id)) return true;
-    // optional code changes
-    const ledger = ledgerByEnrollment?.[enrollment_id] || [];
-    const prev = {};
-    for (const item of ledger) {
-      if (!item?.enabled_in_exam) continue;
-      if (String(item.component_type || "").toUpperCase() !== "TH") continue;
-      const g = subjectIdToOptionalGroup.get(item.subject_id);
-      if (g && !prev[g]) prev[g] = String(item.component_code || "");
-    }
+  const optionalNeedsUpdate = (enrollment_id) => {
+    const prev = optionalBaselineRef.current?.[enrollment_id] || {};
     const now = optionalByEnrollment?.[enrollment_id] || {};
     const keys = new Set([...Object.keys(prev), ...Object.keys(now)]);
     for (const k of keys) {
@@ -648,11 +702,22 @@ export default function MarksGridPage() {
     return false;
   };
 
+  const isLedgerRowDirty = (enrollment_id) => {
+    if (isRowDirty(enrollment_id)) return true;
+    if (studentNeedsUpdate(enrollment_id)) return true;
+    return optionalNeedsUpdate(enrollment_id);
+  };
+
   const markRowSaved = (enrollment_id) => {
     const now = marksByEnrollment?.[enrollment_id] || {};
+    const optNow = optionalByEnrollment?.[enrollment_id] || {};
     baselineRef.current = {
       ...baselineRef.current,
       [enrollment_id]: JSON.parse(JSON.stringify(now)),
+    };
+    optionalBaselineRef.current = {
+      ...optionalBaselineRef.current,
+      [enrollment_id]: JSON.parse(JSON.stringify(optNow)),
     };
     setDirtyByEnrollment((prev) => ({ ...prev, [enrollment_id]: false }));
   };
@@ -786,29 +851,30 @@ export default function MarksGridPage() {
   };
 
   const isLedgerMode = viewMode === "ledger" || viewMode === "grade";
+  const isEnrollmentDirty = (enrollment_id) =>
+    isLedgerMode ? isLedgerRowDirty(enrollment_id) : isRowDirty(enrollment_id);
 
-  // ---------------- SAVE ONE ----------------
-  const saveOne = useMutation({
-    mutationFn: async ({ enrollment_id, student }) => {
-      if (isLedgerMode) {
-        if (student && studentNeedsUpdate(enrollment_id)) {
-          const current = getStudentEdit(enrollment_id);
-          if (!current.full_name || !current.symbol_no) {
-            throw new Error("Full name and symbol number required");
-          }
-          await api.put(`/api/students/${student.student_id}`, {
-            full_name: current.full_name,
-            symbol_no: current.symbol_no,
-            regd_no: current.regd_no || null,
-            roll_no: current.roll_no || null,
-            dob: current.dob || null,
-          });
-          studentBaselineRef.current = {
-            ...studentBaselineRef.current,
-            [enrollment_id]: { ...current },
-          };
+  const persistEnrollment = async ({ enrollment_id, student }) => {
+    if (isLedgerMode) {
+      if (student && studentNeedsUpdate(enrollment_id)) {
+        const current = getStudentEdit(enrollment_id);
+        if (!current.full_name || !current.symbol_no) {
+          throw new Error("Full name and symbol number required");
         }
+        await api.put(`/api/students/${student.student_id}`, {
+          full_name: current.full_name,
+          symbol_no: current.symbol_no,
+          regd_no: current.regd_no || null,
+          roll_no: current.roll_no || null,
+          dob: current.dob || null,
+        });
+        studentBaselineRef.current = {
+          ...studentBaselineRef.current,
+          [enrollment_id]: { ...current },
+        };
+      }
 
+      if (optionalNeedsUpdate(enrollment_id)) {
         const { choices, errors } = buildOptionalChoices(enrollment_id);
         if (errors.length) {
           throw new Error(errors[0]);
@@ -817,14 +883,24 @@ export default function MarksGridPage() {
           await api.post(`/api/students/${enrollment_id}/optional-choices`, { choices });
         }
       }
+    }
 
-      const items =
-        isLedgerMode
-          ? buildLedgerMarks(enrollment_id)
-          : buildDetailedMarks(enrollment_id);
-      const payload = { marks: items };
-      const res = await api.post(`/api/marks/${examId}/enrollments/${enrollment_id}`, payload);
-      return { data: res.data, enrollment_id };
+    const items =
+      isLedgerMode
+        ? buildLedgerMarks(enrollment_id)
+        : buildDetailedMarks(enrollment_id);
+
+    if (items.length === 0) return;
+
+    const payload = { marks: items };
+    await api.post(`/api/marks/${examId}/enrollments/${enrollment_id}`, payload);
+  };
+
+  // ---------------- SAVE ONE ----------------
+  const saveOne = useMutation({
+    mutationFn: async ({ enrollment_id, student }) => {
+      await persistEnrollment({ enrollment_id, student });
+      return { enrollment_id };
     },
     onSuccess: ({ enrollment_id }) => {
       markRowSaved(enrollment_id);
@@ -836,6 +912,7 @@ export default function MarksGridPage() {
   // ---------------- SAVE ALL ----------------
   const saveAll = async () => {
     if (!examId || !batchId) return toast.error("Select exam and batch first");
+    if (!canEditMarks) return toast.error("You do not have permission to edit marks.");
     if (isLocked) return toast.error("Exam is locked/published. Cannot save.");
     if (students.length === 0) return toast.error("No students found");
 
@@ -849,38 +926,7 @@ export default function MarksGridPage() {
         const eid = s.enrollment_id;
 
         try {
-          if (isLedgerMode) {
-            if (studentNeedsUpdate(eid)) {
-              const current = getStudentEdit(eid);
-              if (!current.full_name || !current.symbol_no) {
-                throw new Error("Full name and symbol number required");
-              }
-              await api.put(`/api/students/${s.student_id}`, {
-                full_name: current.full_name,
-                symbol_no: current.symbol_no,
-                regd_no: current.regd_no || null,
-                roll_no: current.roll_no || null,
-                dob: current.dob || null,
-              });
-              studentBaselineRef.current = {
-                ...studentBaselineRef.current,
-                [eid]: { ...current },
-              };
-            }
-
-            const { choices, errors } = buildOptionalChoices(eid);
-            if (errors.length) throw new Error(errors[0]);
-            if (choices.length) {
-              await api.post(`/api/students/${eid}/optional-choices`, { choices });
-            }
-          }
-
-          const items =
-            isLedgerMode
-              ? buildLedgerMarks(eid)
-              : buildDetailedMarks(eid);
-          const payload = { marks: items };
-          await api.post(`/api/marks/${examId}/enrollments/${eid}`, payload);
+          await persistEnrollment({ enrollment_id: eid, student: s });
 
           // ✅ mark saved baseline
           markRowSaved(eid);
@@ -910,6 +956,9 @@ export default function MarksGridPage() {
     if (!examId || !batchId) return toast.error("Select exam and batch first");
     if (isLocked) return toast.error("Exam is locked/published. Cannot generate.");
     if (students.length === 0) return toast.error("No students found");
+    if (!canGenerateSnapshots) {
+      return toast.error("Only Admin or Super Admin can generate snapshots.");
+    }
 
     setGeneratingAll(true);
     setGenerateProgress({ done: 0, total: students.length });
@@ -920,6 +969,10 @@ export default function MarksGridPage() {
         const s = students[i];
         const eid = s.enrollment_id;
         try {
+          if (isEnrollmentDirty(eid)) {
+            await persistEnrollment({ enrollment_id: eid, student: s });
+            markRowSaved(eid);
+          }
           await api.post(`/api/results/${examId}/enrollments/${eid}/generate`);
         } catch (e) {
           errors.push({
@@ -938,32 +991,106 @@ export default function MarksGridPage() {
         toast.error(`Generated with ${errors.length} error(s). Check console.`);
         console.table(errors);
       }
+      await workflowQ.refetch();
     } finally {
       setGeneratingAll(false);
     }
   };
+
+  const submitWorkflowMutation = useMutation({
+    mutationFn: async () => {
+      const res = await api.post(`/api/results/${examId}/submit`);
+      return res.data;
+    },
+    onSuccess: async (data) => {
+      toast.success(data?.message || "Submitted for verification");
+      await workflowQ.refetch();
+    },
+    onError: (e) => toast.error(e?.response?.data?.message || e.message || "Submit failed"),
+  });
+
+  const verifyWorkflowMutation = useMutation({
+    mutationFn: async () => {
+      const res = await api.post(`/api/results/${examId}/verify`);
+      return res.data;
+    },
+    onSuccess: async (data) => {
+      toast.success(data?.message || "Exam verified");
+      await workflowQ.refetch();
+    },
+    onError: (e) => toast.error(e?.response?.data?.message || e.message || "Verification failed"),
+  });
+
+  const approveWorkflowMutation = useMutation({
+    mutationFn: async () => {
+      const res = await api.post(`/api/results/${examId}/approve`);
+      return res.data;
+    },
+    onSuccess: async (data) => {
+      toast.success(data?.message || "Exam approved");
+      await workflowQ.refetch();
+    },
+    onError: (e) => toast.error(e?.response?.data?.message || e.message || "Approval failed"),
+  });
+
+  const publishWorkflowMutation = useMutation({
+    mutationFn: async () => {
+      const res = await api.post(`/api/results/${examId}/publish`);
+      return res.data;
+    },
+    onSuccess: async (data) => {
+      toast.success(data?.message || "Exam published and locked");
+      await examsQ.refetch();
+      await workflowQ.refetch();
+    },
+    onError: (e) => toast.error(e?.response?.data?.message || e.message || "Publish failed"),
+  });
 
   // ---------------- IMPORT ----------------
   const importMutation = useMutation({
     mutationFn: async (file) => {
       const fd = new FormData();
       fd.append("file", file);
-      const res = await api.post(`/api/import/marks?exam_id=${examId}`, fd, {
+      const qs = new URLSearchParams();
+      qs.set("exam_id", String(examId));
+      if (batchId) qs.set("batch_id", String(batchId));
+      const res = await api.post(`/api/import/marks?${qs.toString()}`, fd, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       return res.data;
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       setImportSummary(data);
       setImportFile(null);
-      toast.success(`Imported ${data?.imported || 0} rows`);
+      const imported = Number(data?.imported || 0);
+      const errorsCount = Number(data?.errors_count || 0);
+      const skipped = Number(data?.skipped || 0);
+      if (errorsCount > 0 || skipped > 0) {
+        toast.error(
+          `Imported ${imported} row(s) with ${errorsCount} error(s) and ${skipped} skipped row(s).`
+        );
+      } else {
+        toast.success(`Imported ${imported} rows`);
+      }
+      let latestStudents = students;
       if (batchId) {
-        loadLedgers();
-        studentsQ.refetch?.();
+        const refreshed = await studentsQ.refetch?.();
+        if (Array.isArray(refreshed?.data)) {
+          latestStudents = refreshed.data;
+        }
+      }
+      await loadLedgers(latestStudents);
+      if (viewMode === "grade") {
+        await loadGrades();
       }
     },
-    onError: (e) =>
-      toast.error(e?.response?.data?.message || e.message || "Import failed"),
+    onError: (e) => {
+      const data = e?.response?.data;
+      if (data?.errors_count || Array.isArray(data?.errors)) {
+        setImportSummary(data);
+      }
+      toast.error(data?.message || e.message || "Import failed");
+    },
   });
 
   const onImport = () => {
@@ -971,8 +1098,16 @@ export default function MarksGridPage() {
       toast.error("Select exam first");
       return;
     }
+    if (!batchId) {
+      toast.error("Select batch first");
+      return;
+    }
     if (isLocked) {
       toast.error("Exam is locked/published. Import disabled.");
+      return;
+    }
+    if (!canEditMarks) {
+      toast.error("You do not have permission to import marks.");
       return;
     }
     if (!importFile) {
@@ -1067,49 +1202,34 @@ export default function MarksGridPage() {
       full_name: student.full_name,
     });
     setPreviewData(null);
+    setPreviewError("");
     setPreviewOpen(true);
+
+    if (canEditMarks && isEnrollmentDirty(student.enrollment_id)) {
+      try {
+        await persistEnrollment({
+          enrollment_id: student.enrollment_id,
+          student,
+        });
+        markRowSaved(student.enrollment_id);
+      } catch (e) {
+        const msg = e?.response?.data?.message || e?.message || "Auto-save failed";
+        setPreviewError(`Auto-save failed: ${msg}. Showing last saved marks preview.`);
+        toast.error(msg);
+      }
+    } else if (!canEditMarks && isEnrollmentDirty(student.enrollment_id)) {
+      setPreviewError("Unsaved local changes are not included because this role has read-only access.");
+    }
 
     try {
       const data = await previewMutation.mutateAsync({
         enrollment_id: student.enrollment_id,
       });
       setPreviewData(data);
-    } catch {
-      // toast already shown
-    }
-  };
-
-  const summary = useMemo(() => {
-    const d = previewData || {};
-    return d.summary || d.result || d.data?.summary || d.data?.result || d;
-  }, [previewData]);
-
-  const subjects = useMemo(() => {
-    if (!summary) return [];
-    if (Array.isArray(summary.subjects)) return summary.subjects;
-    if (Array.isArray(summary.subject_results)) return summary.subject_results;
-    if (Array.isArray(summary.rows)) return summary.rows;
-    return [];
-  }, [summary]);
-
-  // ✅ GENERATE SNAPSHOT PER ROW
-  const generateMutation = useMutation({
-    mutationFn: async ({ enrollment_id }) => {
-      const res = await api.post(`/api/results/${examId}/enrollments/${enrollment_id}/generate`);
-      return res.data;
-    },
-  });
-
-  const generateOne = async (student) => {
-    if (!examId) return toast.error("Select exam first");
-    if (!student?.enrollment_id) return toast.error("Invalid enrollment");
-    if (isLocked) return toast.error("Exam is locked/published. Cannot generate.");
-
-    try {
-      await generateMutation.mutateAsync({ enrollment_id: student.enrollment_id });
-      toast.success(`Snapshot generated: ${student.symbol_no}`);
+      toast.success("Preview loaded");
     } catch (e) {
-      toast.error(e?.response?.data?.message || e.message || "Generate failed");
+      const msg = e?.response?.data?.message || e?.message || "Preview failed";
+      setPreviewError(msg);
     }
   };
 
@@ -1289,7 +1409,8 @@ export default function MarksGridPage() {
                   !batchId ||
                   savingAll ||
                   loadingLedgers ||
-                  isLocked
+                  isLocked ||
+                  !canEditMarks
                 }
               >
                 {savingAll ? "Saving..." : "Save All"}
@@ -1297,17 +1418,9 @@ export default function MarksGridPage() {
 
               {generatingAll ? (
                 <Badge variant="outline">
-                  Generating {generateProgress.done}/{generateProgress.total}
+                  Finalizing {generateProgress.done}/{generateProgress.total}
                 </Badge>
               ) : null}
-
-              <Button
-                variant="secondary"
-                onClick={generateAll}
-                disabled={!examId || !batchId || generatingAll || loadingLedgers || isLocked}
-              >
-                {generatingAll ? "Generating..." : "Generate All"}
-              </Button>
             </div>
           </div>
         </CardContent>
@@ -1354,35 +1467,69 @@ export default function MarksGridPage() {
             />
             <Button
               onClick={onImport}
-              disabled={!importFile || importMutation.isPending}
+              disabled={!importFile || importMutation.isPending || !canEditMarks}
             >
               {importMutation.isPending ? "Importing..." : "Import Marks"}
             </Button>
           </div>
 
           {importSummary ? (
-            <div className="rounded-md border p-3 text-xs space-y-1">
-              <div>Sheet: {importSummary.sheet || "—"}</div>
+            <div className="rounded-md border p-3 text-xs space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge
+                  variant={
+                    Number(importSummary?.errors_count || 0) > 0 ||
+                    Number(importSummary?.skipped || 0) > 0
+                      ? "destructive"
+                      : "secondary"
+                  }
+                >
+                  {Number(importSummary?.errors_count || 0) > 0 ||
+                  Number(importSummary?.skipped || 0) > 0
+                    ? "Imported With Issues"
+                    : "Import Successful"}
+                </Badge>
+                <div className="text-muted-foreground">
+                  Sheet: {importSummary.sheet || "—"}
+                </div>
+              </div>
+
               <div>
                 Imported: {importSummary.imported || 0} • Skipped:{" "}
                 {importSummary.skipped || 0} • Errors: {importSummary.errors_count || 0}
               </div>
-              {Array.isArray(importSummary.errors) && importSummary.errors.length > 0 ? (
-                <div className="pt-2 text-muted-foreground">
-                  <div className="font-medium text-foreground mb-1">First errors:</div>
-                  <ul className="space-y-1">
-                    {importSummary.errors.slice(0, 5).map((e, idx) => (
-                      <li key={idx}>
-                        Row {e.row}: {e.reason}
-                      </li>
-                    ))}
-                  </ul>
+
+              {importErrors.length > 0 ? (
+                <div className="pt-2 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-medium text-foreground">
+                      Import Issues ({importErrors.length})
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-xs"
+                      onClick={downloadImportErrors}
+                    >
+                      Download Error CSV
+                    </Button>
+                  </div>
+                  <div className="max-h-36 overflow-auto rounded border p-2 text-muted-foreground">
+                    <ul className="space-y-1">
+                      {importErrors.map((e, idx) => (
+                        <li key={`${e?.row || "x"}-${idx}`}>
+                          Row {e?.row ?? "—"}: {e?.reason || "Unknown error"}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
               ) : null}
             </div>
           ) : null}
         </CardContent>
       </Card>
+
 
       <div className="rounded-lg border">
         <div className="p-3 border-b flex items-center justify-between">
@@ -1662,6 +1809,8 @@ export default function MarksGridPage() {
                               const optCode =
                                 (optionalByEnrollment?.[eid] || {})[g.name] || "";
                               const meta = optionalCodeMap.get(String(optCode));
+                              const isMissingOptCode =
+                                (g.subjects || []).length > 0 && !optCode;
                               const listId = `opt-${String(g.name || "")
                                 .toLowerCase()
                                 .replace(/[^a-z0-9]+/g, "-")}`;
@@ -1675,7 +1824,9 @@ export default function MarksGridPage() {
                               return (
                                 <Fragment key={g.name}>
                                   <td
-                                    className="px-0.5 py-0.5 border-l"
+                                    className={`px-0.5 py-0.5 border-l ${
+                                      isMissingOptCode ? "bg-destructive/5" : ""
+                                    }`}
                                     style={{
                                       width: SUBJECT_COL_W,
                                       minWidth: SUBJECT_COL_W,
@@ -1683,7 +1834,11 @@ export default function MarksGridPage() {
                                     }}
                                   >
                                     <Input
-                                      className="h-5 px-0 text-[10px]"
+                                      className={
+                                        isMissingOptCode
+                                          ? "h-5 px-0 text-[10px] border-destructive focus-visible:ring-destructive/40"
+                                          : "h-5 px-0 text-[10px]"
+                                      }
                                       list={listId}
                                       value={optCode}
                                       placeholder="Code"
@@ -1704,6 +1859,10 @@ export default function MarksGridPage() {
                                     {meta ? (
                                       <div className="text-[8px] text-muted-foreground mt-0.5">
                                         {meta.subject_name}
+                                      </div>
+                                    ) : isMissingOptCode ? (
+                                      <div className="text-[8px] text-destructive mt-0.5">
+                                        Required
                                       </div>
                                     ) : null}
                                   </td>
@@ -1795,10 +1954,14 @@ export default function MarksGridPage() {
                                 <Button
                                   size="sm"
                                   className="h-7 px-2"
-                                  disabled={saveOne.isPending}
+                                  disabled={saveOne.isPending || !canEditMarks}
                                   onClick={() => {
                                     if (!examId) {
                                       toast.error("Select exam first");
+                                      return;
+                                    }
+                                    if (!canEditMarks) {
+                                      toast.error("You do not have permission to edit marks.");
                                       return;
                                     }
                                     if (isLocked) {
@@ -1824,25 +1987,6 @@ export default function MarksGridPage() {
                                     : "Preview"}
                                 </Button>
 
-                                <Button
-                                  size="sm"
-                                  className="h-7 px-2"
-                                  variant="secondary"
-                                  disabled={generateMutation.isPending}
-                                  onClick={() => {
-                                    if (!examId) {
-                                      toast.error("Select exam first");
-                                      return;
-                                    }
-                                    if (isLocked) {
-                                      toast.error("Exam is locked/published. Cannot generate.");
-                                      return;
-                                    }
-                                    generateOne(s);
-                                  }}
-                                >
-                                  {generateMutation.isPending ? "Generating..." : "Generate"}
-                                </Button>
                               </div>
                             </td>
                           </tr>
@@ -2039,6 +2183,8 @@ export default function MarksGridPage() {
                             {optionalGroups.map((g) => {
                               const optCode =
                                 (optionalByEnrollment?.[eid] || {})[g.name] || "";
+                              const missingOptCode =
+                                (g.subjects || []).length > 0 && !optCode;
                               const meta = optCode
                                 ? optionalCodeMap.get(String(optCode))
                                 : null;
@@ -2046,7 +2192,13 @@ export default function MarksGridPage() {
 
                               return (
                                 <Fragment key={`row-${eid}-${g.name}`}>
-                                  <td className="p-2 text-center border-l">
+                                  <td
+                                    className={`p-2 text-center border-l ${
+                                      missingOptCode
+                                        ? "bg-destructive/5 text-destructive font-medium"
+                                        : ""
+                                    }`}
+                                  >
                                     {optCode || "—"}
                                   </td>
                                   <td className="p-2 text-center border-l">
@@ -2319,10 +2471,14 @@ export default function MarksGridPage() {
                               <Button
                                 size="sm"
                                 className="h-8 px-2"
-                                disabled={saveOne.isPending}
+                                disabled={saveOne.isPending || !canEditMarks}
                                 onClick={() => {
                                   if (!examId) {
                                     toast.error("Select exam first");
+                                    return;
+                                  }
+                                  if (!canEditMarks) {
+                                    toast.error("You do not have permission to edit marks.");
                                     return;
                                   }
                                   if (isLocked) {
@@ -2348,25 +2504,6 @@ export default function MarksGridPage() {
                                   : "Preview"}
                               </Button>
 
-                              <Button
-                                size="sm"
-                                className="h-8 px-2"
-                                variant="secondary"
-                                disabled={generateMutation.isPending}
-                                onClick={() => {
-                                  if (!examId) {
-                                    toast.error("Select exam first");
-                                    return;
-                                  }
-                                  if (isLocked) {
-                                    toast.error("Exam is locked/published. Cannot generate.");
-                                    return;
-                                  }
-                                  generateOne(s);
-                                }}
-                              >
-                                {generateMutation.isPending ? "Generating..." : "Generate"}
-                              </Button>
                             </div>
                           </td>
                         </tr>
@@ -2403,120 +2540,111 @@ export default function MarksGridPage() {
         </div>
       </div>
 
-      {/* ✅ Preview Dialog */}
-      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Result Preview</DialogTitle>
-            <DialogDescription>
-              Exam #{examId || "—"} •{" "}
-              {previewStudent
-                ? `${previewStudent.symbol_no} — ${previewStudent.full_name}`
-                : "—"}
-            </DialogDescription>
-          </DialogHeader>
 
-          {!previewStudent ? (
-            <div className="text-sm text-muted-foreground">No student selected.</div>
-          ) : previewMutation.isPending && !previewData ? (
-            <div className="text-sm text-muted-foreground">Loading preview...</div>
-          ) : !previewData ? (
-            <div className="text-sm text-muted-foreground">Preview data not available.</div>
-          ) : (
-            <div className="space-y-4">
-              <div className="rounded-md border p-4">
-                <div className="text-sm font-semibold mb-2">Summary</div>
-                <PreviewKV label="GPA" value={summary?.gpa ?? summary?.overall_gpa} />
-                <PreviewKV label="Grade" value={summary?.grade ?? summary?.overall_grade} />
-                <PreviewKV label="Result" value={summary?.result ?? summary?.status} />
-                <PreviewKV label="Total" value={summary?.total ?? summary?.grand_total} />
-              </div>
-
-              <div className="rounded-md border">
-                <div className="px-4 py-2 border-b text-sm font-semibold">Subjects</div>
-
-                {subjects.length === 0 ? (
-                  <div className="rounded-md border">
-                    <div className="px-4 py-2 border-b text-sm font-semibold">
-                      Raw Preview JSON (Debug)
-                    </div>
-                    <div className="p-4">
-                      <pre className="text-xs whitespace-pre-wrap break-words">
-                        {JSON.stringify(previewData, null, 2)}
-                      </pre>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-4 space-y-3">
-                    {subjects.map((subj, idx) => {
-                      const subjectName =
-                        subj.subject_name || subj.name || `Subject ${idx + 1}`;
-                      const subjectCode = subj.subject_code || subj.code || "";
-                      const gpa = subj.gpa ?? subj.grade_point ?? "";
-                      const grade = subj.grade ?? "";
-                      const status = subj.status ?? subj.result ?? "";
-
-                      const components = Array.isArray(subj.components)
-                        ? subj.components
-                        : Array.isArray(subj.component_results)
-                        ? subj.component_results
-                        : [];
-
-                      return (
-                        <div key={idx} className="rounded-md border p-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-semibold">
-                                {subjectName}{" "}
-                                {subjectCode ? (
-                                  <span className="text-xs text-muted-foreground">
-                                    ({pad4(subjectCode)})
-                                  </span>
-                                ) : null}
-                              </div>
-                              <div className="text-xs text-muted-foreground">
-                                {status ? `Status: ${status}` : ""}
-                              </div>
-                            </div>
-
-                            <div className="text-right text-sm">
-                              {gpa !== "" ? <div>GPA: {gpa}</div> : null}
-                              {grade ? <div>Grade: {grade}</div> : null}
-                            </div>
-                          </div>
-
-                          {components.length ? (
-                            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
-                              {components.map((c, cidx) => (
-                                <div key={cidx} className="flex justify-between text-sm">
-                                  <div className="text-muted-foreground">
-                                    {c.component_name ||
-                                      c.name ||
-                                      c.component_type ||
-                                      c.code ||
-                                      "Component"}
-                                  </div>
-                                  <div className="font-medium">
-                                    {c.marks ?? c.obtained ?? c.score ?? "—"}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="mt-2 text-xs text-muted-foreground">
-                              (No components returned)
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+{/* Review and approval section starts from here------------------------- */}
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-sm font-medium">Final Result Workflow</div>
+              <div className="text-xs text-muted-foreground">
+                Finalize All → Submit for verification → Verify (Exam Head) → Approve (Chief/Asst Chief) → Publish
               </div>
             </div>
-          )}
-        </DialogContent>
-      </Dialog>
+            <Badge variant={workflowBadgeVariant(workflowStatus)}>
+              {workflowStatus}
+            </Badge>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+            <Button
+              variant="secondary"
+              onClick={generateAll}
+              disabled={
+                !examId ||
+                !batchId ||
+                generatingAll ||
+                loadingLedgers ||
+                isLocked ||
+                !canGenerateSnapshots
+              }
+              title="Generate latest result snapshots from entered marks"
+            >
+              {generatingAll ? "Finalizing..." : "Finalize All"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => submitWorkflowMutation.mutate()}
+              disabled={
+                !examId ||
+                !canSubmit ||
+                isLocked ||
+                submitWorkflowMutation.isPending ||
+                workflowStatus === "SUBMITTED" ||
+                workflowStatus === "VERIFIED" ||
+                workflowStatus === "APPROVED" ||
+                workflowStatus === "PUBLISHED"
+              }
+            >
+              {submitWorkflowMutation.isPending ? "Submitting..." : "Submit"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => verifyWorkflowMutation.mutate()}
+              disabled={
+                !examId ||
+                !canVerify ||
+                isLocked ||
+                verifyWorkflowMutation.isPending ||
+                workflowStatus !== "SUBMITTED"
+              }
+            >
+              {verifyWorkflowMutation.isPending ? "Verifying..." : "Verify"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => approveWorkflowMutation.mutate()}
+              disabled={
+                !examId ||
+                !canApprove ||
+                isLocked ||
+                approveWorkflowMutation.isPending ||
+                workflowStatus !== "VERIFIED"
+              }
+            >
+              {approveWorkflowMutation.isPending ? "Approving..." : "Approve"}
+            </Button>
+            <Button
+              onClick={() => publishWorkflowMutation.mutate()}
+              disabled={
+                !examId ||
+                !canPublish ||
+                isLocked ||
+                publishWorkflowMutation.isPending ||
+                workflowStatus !== "APPROVED"
+              }
+            >
+              {publishWorkflowMutation.isPending ? "Publishing..." : "Publish"}
+            </Button>
+          </div>
+
+          <div className="text-xs text-muted-foreground">
+            Snapshots: {workflowQ.data?.snapshots_total ?? 0} | Published:{" "}
+            {workflowQ.data?.snapshots_published ?? 0}
+          </div>
+        </CardContent>
+      </Card>
+
+      
+      <ResultPreviewDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        loading={previewMutation.isPending && !previewData}
+        previewData={previewData}
+        examLabel={selectedExam?.name || selectedExam?.title || `Exam #${examId || "—"}`}
+        student={previewStudent}
+        enrollmentId={previewStudent?.enrollment_id || ""}
+      />
     </div>
   );
 }

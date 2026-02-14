@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Eye, EyeOff, Sparkles, ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, Sparkles, ShieldCheck, Globe2 } from "lucide-react";
 
 import { api } from "../../lib/api";
 import { setToken } from "../../lib/auth";
@@ -189,6 +189,24 @@ export default function LoginPage() {
               <div className="mt-5 rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
                 Tip: Use App Settings after login to customize brand colors and
                 announcement bar styles.
+              </div>
+
+              <div className="mt-4 rounded-lg border border-primary/20 bg-primary/5 p-3">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Globe2 className="h-4 w-4 text-primary" />
+                  Public Portal Access
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Students and parents can view published results with OTP-based access.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-3 w-full"
+                  onClick={() => nav("/public")}
+                >
+                  Open Public Portal
+                </Button>
               </div>
             </CardContent>
           </Card>

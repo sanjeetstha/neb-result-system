@@ -1,6 +1,20 @@
 const db = require("../db");
 const { previewResult } = require("../services/result.service");
 
+const WORKFLOW_STATES = new Set([
+  "DRAFT",
+  "SUBMITTED",
+  "VERIFIED",
+  "APPROVED",
+  "PUBLISHED",
+]);
+
+function normalizeWorkflowState(examRow) {
+  if (examRow?.published_at || Number(examRow?.is_locked || 0) === 1) return "PUBLISHED";
+  const raw = String(examRow?.workflow_status || "").trim().toUpperCase();
+  return WORKFLOW_STATES.has(raw) ? raw : "DRAFT";
+}
+
 async function preview(req, res) {
   try {
     const examId = Number(req.params.examId);
@@ -19,7 +33,7 @@ async function generate(req, res) {
     const enrollmentId = Number(req.params.enrollmentId);
 
     const [[exam]] = await db.query(
-      `SELECT id, is_locked FROM exams WHERE id=? LIMIT 1`,
+      `SELECT id, is_locked, workflow_status FROM exams WHERE id=? LIMIT 1`,
       [examId]
     );
     if (!exam) return res.status(404).json({ ok: false, message: "Exam not found" });
@@ -71,6 +85,16 @@ async function generate(req, res) {
       [examId, enrollmentId, "GENERATE", req.user.uid]
     );
 
+    await db.query(
+      `UPDATE exams
+       SET workflow_status='DRAFT',
+           submitted_at=NULL, submitted_by=NULL,
+           verified_at=NULL, verified_by=NULL,
+           approved_at=NULL, approved_by=NULL
+       WHERE id=? AND is_locked=0 AND COALESCE(workflow_status,'DRAFT')<>'DRAFT'`,
+      [examId]
+    );
+
     res.json({ ok: true, message: "Snapshot generated", exam_id: examId, enrollment_id: enrollmentId });
   } catch (e) {
     res.status(400).json({ ok: false, message: e.message || "Error" });
@@ -115,11 +139,19 @@ async function publishExam(req, res) {
   const examId = Number(req.params.examId);
 
   const [[exam]] = await db.query(
-    `SELECT id, is_locked FROM exams WHERE id=? LIMIT 1`,
+    `SELECT id, is_locked, published_at, workflow_status FROM exams WHERE id=? LIMIT 1`,
     [examId]
   );
   if (!exam) return res.status(404).json({ ok: false, message: "Exam not found" });
   if (exam.is_locked) return res.status(409).json({ ok: false, message: "Exam already published/locked" });
+  const state = normalizeWorkflowState(exam);
+  if (state !== "APPROVED") {
+    return res.status(409).json({
+      ok: false,
+      message: "Exam must be approved by chief/assistant chief before publish",
+      workflow_status: state,
+    });
+  }
 
   // publish only those snapshots that exist
   const [r] = await db.query(
@@ -135,7 +167,9 @@ async function publishExam(req, res) {
 
   // lock exam
   await db.query(
-    `UPDATE exams SET published_at=NOW(), is_locked=1 WHERE id=?`,
+    `UPDATE exams
+     SET published_at=NOW(), is_locked=1, workflow_status='PUBLISHED'
+     WHERE id=?`,
     [examId]
   );
 
@@ -168,7 +202,13 @@ async function unpublishExam(req, res) {
   );
 
   await db.query(
-    `UPDATE exams SET published_at=NULL, is_locked=0 WHERE id=?`,
+    `UPDATE exams
+     SET published_at=NULL, is_locked=0,
+         workflow_status='DRAFT',
+         submitted_at=NULL, submitted_by=NULL,
+         verified_at=NULL, verified_by=NULL,
+         approved_at=NULL, approved_by=NULL
+     WHERE id=?`,
     [examId]
   );
 
@@ -181,4 +221,166 @@ async function unpublishExam(req, res) {
   res.json({ ok: true, message: "Exam unpublished and unlocked" });
 }
 
-module.exports = { preview, generate, getSnapshot, publishExam, unpublishExam };
+async function getWorkflow(req, res) {
+  const examId = Number(req.params.examId);
+  const [[exam]] = await db.query(
+    `SELECT id, name, is_locked, published_at, workflow_status,
+            submitted_at, submitted_by, verified_at, verified_by, approved_at, approved_by
+     FROM exams
+     WHERE id=? LIMIT 1`,
+    [examId]
+  );
+  if (!exam) return res.status(404).json({ ok: false, message: "Exam not found" });
+
+  const [[counts]] = await db.query(
+    `SELECT
+        COUNT(*) AS snapshots_total,
+        SUM(CASE WHEN published_at IS NOT NULL THEN 1 ELSE 0 END) AS snapshots_published
+     FROM result_snapshots
+     WHERE exam_id=?`,
+    [examId]
+  );
+
+  res.json({
+    ok: true,
+    workflow: {
+      status: normalizeWorkflowState(exam),
+      submitted_at: exam.submitted_at || null,
+      submitted_by: exam.submitted_by || null,
+      verified_at: exam.verified_at || null,
+      verified_by: exam.verified_by || null,
+      approved_at: exam.approved_at || null,
+      approved_by: exam.approved_by || null,
+      published_at: exam.published_at || null,
+      snapshots_total: Number(counts?.snapshots_total || 0),
+      snapshots_published: Number(counts?.snapshots_published || 0),
+    },
+  });
+}
+
+async function submitForVerification(req, res) {
+  const examId = Number(req.params.examId);
+  const [[exam]] = await db.query(
+    `SELECT id, is_locked, published_at, workflow_status FROM exams WHERE id=? LIMIT 1`,
+    [examId]
+  );
+  if (!exam) return res.status(404).json({ ok: false, message: "Exam not found" });
+  if (exam.is_locked || exam.published_at) {
+    return res.status(409).json({ ok: false, message: "Exam already published/locked" });
+  }
+
+  const [[snap]] = await db.query(
+    `SELECT COUNT(*) AS c FROM result_snapshots WHERE exam_id=?`,
+    [examId]
+  );
+  if (!Number(snap?.c || 0)) {
+    return res.status(400).json({
+      ok: false,
+      message: "No finalized snapshots found. Run Finalize All first.",
+    });
+  }
+
+  await db.query(
+    `UPDATE exams
+     SET workflow_status='SUBMITTED',
+         submitted_at=NOW(), submitted_by=?,
+         verified_at=NULL, verified_by=NULL,
+         approved_at=NULL, approved_by=NULL
+     WHERE id=?`,
+    [req.user.uid, examId]
+  );
+
+  await db.query(
+    `INSERT INTO result_actions (exam_id, enrollment_id, action, done_by, done_at, note)
+     VALUES (?,NULL,'SUBMIT_VERIFY',?,NOW(),?)`,
+    [examId, req.user.uid, "Submitted to exam head for verification"]
+  );
+
+  res.json({ ok: true, message: "Submitted for verification" });
+}
+
+async function verifyExam(req, res) {
+  const examId = Number(req.params.examId);
+  const [[exam]] = await db.query(
+    `SELECT id, is_locked, published_at, workflow_status FROM exams WHERE id=? LIMIT 1`,
+    [examId]
+  );
+  if (!exam) return res.status(404).json({ ok: false, message: "Exam not found" });
+  if (exam.is_locked || exam.published_at) {
+    return res.status(409).json({ ok: false, message: "Exam already published/locked" });
+  }
+
+  const state = normalizeWorkflowState(exam);
+  if (state !== "SUBMITTED") {
+    return res.status(409).json({
+      ok: false,
+      message: "Exam must be submitted before verification",
+      workflow_status: state,
+    });
+  }
+
+  await db.query(
+    `UPDATE exams
+     SET workflow_status='VERIFIED',
+         verified_at=NOW(), verified_by=?
+     WHERE id=?`,
+    [req.user.uid, examId]
+  );
+
+  await db.query(
+    `INSERT INTO result_actions (exam_id, enrollment_id, action, done_by, done_at, note)
+     VALUES (?,NULL,'VERIFY',?,NOW(),?)`,
+    [examId, req.user.uid, "Verified by exam head"]
+  );
+
+  res.json({ ok: true, message: "Exam verified" });
+}
+
+async function approveExam(req, res) {
+  const examId = Number(req.params.examId);
+  const [[exam]] = await db.query(
+    `SELECT id, is_locked, published_at, workflow_status FROM exams WHERE id=? LIMIT 1`,
+    [examId]
+  );
+  if (!exam) return res.status(404).json({ ok: false, message: "Exam not found" });
+  if (exam.is_locked || exam.published_at) {
+    return res.status(409).json({ ok: false, message: "Exam already published/locked" });
+  }
+
+  const state = normalizeWorkflowState(exam);
+  if (state !== "VERIFIED") {
+    return res.status(409).json({
+      ok: false,
+      message: "Exam must be verified before approval",
+      workflow_status: state,
+    });
+  }
+
+  await db.query(
+    `UPDATE exams
+     SET workflow_status='APPROVED',
+         approved_at=NOW(), approved_by=?
+     WHERE id=?`,
+    [req.user.uid, examId]
+  );
+
+  await db.query(
+    `INSERT INTO result_actions (exam_id, enrollment_id, action, done_by, done_at, note)
+     VALUES (?,NULL,'APPROVE',?,NOW(),?)`,
+    [examId, req.user.uid, "Approved by chief/assistant chief"]
+  );
+
+  res.json({ ok: true, message: "Exam approved for publish" });
+}
+
+module.exports = {
+  preview,
+  generate,
+  getSnapshot,
+  getWorkflow,
+  submitForVerification,
+  verifyExam,
+  approveExam,
+  publishExam,
+  unpublishExam,
+};

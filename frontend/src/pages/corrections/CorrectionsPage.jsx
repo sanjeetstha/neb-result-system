@@ -3,11 +3,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { api } from "../../lib/api";
+import { useMe } from "../../lib/useMe";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Badge } from "../../components/ui/badge";
 import { Card, CardContent } from "../../components/ui/card";
 import { Separator } from "../../components/ui/separator";
+import { useEffect } from "react";
 
 function Select({ label, value, onChange, options, placeholder }) {
   return (
@@ -31,6 +33,8 @@ function Select({ label, value, onChange, options, placeholder }) {
 
 export default function CorrectionsPage() {
   const qc = useQueryClient();
+  const { data: me } = useMe();
+  const canReview = me?.role === "SUPER_ADMIN" || me?.role === "ADMIN";
 
   const [tab, setTab] = useState("REQUEST"); // REQUEST | REVIEW | MINE
   const [examId, setExamId] = useState("");
@@ -42,6 +46,12 @@ export default function CorrectionsPage() {
   const [reason, setReason] = useState("");
   const [statusFilter, setStatusFilter] = useState("PENDING");
   const [reviewNotes, setReviewNotes] = useState({});
+
+  useEffect(() => {
+    if (!canReview && tab === "REVIEW") {
+      setTab("REQUEST");
+    }
+  }, [canReview, tab]);
 
   const examsQ = useQuery({
     queryKey: ["exams", "list"],
@@ -155,6 +165,8 @@ export default function CorrectionsPage() {
       setNewAbsent(false);
       setReason("");
       await qc.invalidateQueries({ queryKey: ["corrections", "mine"] });
+      await qc.invalidateQueries({ queryKey: ["corrections", "mine", "count"] });
+      await qc.invalidateQueries({ queryKey: ["corrections", "count", "pending"] });
     },
     onError: (err) => {
       toast.error(err?.response?.data?.message || err.message || "Request failed");
@@ -163,7 +175,7 @@ export default function CorrectionsPage() {
 
   const reviewQ = useQuery({
     queryKey: ["corrections", "list", statusFilter],
-    enabled: tab === "REVIEW",
+    enabled: canReview && tab === "REVIEW",
     queryFn: async () => {
       const res = await api.get(`/api/corrections?status=${encodeURIComponent(statusFilter)}`);
       return res.data?.requests ?? [];
@@ -181,6 +193,30 @@ export default function CorrectionsPage() {
     staleTime: 5_000,
   });
 
+  const pendingReviewCountQ = useQuery({
+    queryKey: ["corrections", "count", "pending"],
+    enabled: canReview,
+    queryFn: async () => {
+      const res = await api.get("/api/corrections?status=PENDING");
+      const arr = res.data?.requests ?? [];
+      return Array.isArray(arr) ? arr.length : 0;
+    },
+    staleTime: 5_000,
+    refetchInterval: 10_000,
+  });
+
+  const myPendingCountQ = useQuery({
+    queryKey: ["corrections", "mine", "count"],
+    enabled: !!me,
+    queryFn: async () => {
+      const res = await api.get("/api/corrections/mine");
+      const arr = Array.isArray(res.data?.requests) ? res.data.requests : [];
+      return arr.filter((r) => String(r.status || "").toUpperCase() === "PENDING").length;
+    },
+    staleTime: 5_000,
+    refetchInterval: 10_000,
+  });
+
   const approveMutation = useMutation({
     mutationFn: async ({ id, note }) => {
       const res = await api.post(`/api/corrections/${id}/approve`, { note });
@@ -189,6 +225,11 @@ export default function CorrectionsPage() {
     onSuccess: async () => {
       toast.success("Request approved");
       await qc.invalidateQueries({ queryKey: ["corrections", "list", statusFilter] });
+      await qc.invalidateQueries({ queryKey: ["corrections", "count", "pending"] });
+      await qc.invalidateQueries({ queryKey: ["corrections", "mine"] });
+      await qc.invalidateQueries({ queryKey: ["corrections", "mine", "count"] });
+      await qc.invalidateQueries({ queryKey: ["marks", "ledger"] });
+      await qc.invalidateQueries({ queryKey: ["reports"] });
     },
     onError: (err) => {
       toast.error(err?.response?.data?.message || err.message || "Approve failed");
@@ -203,6 +244,9 @@ export default function CorrectionsPage() {
     onSuccess: async () => {
       toast.success("Request rejected");
       await qc.invalidateQueries({ queryKey: ["corrections", "list", statusFilter] });
+      await qc.invalidateQueries({ queryKey: ["corrections", "count", "pending"] });
+      await qc.invalidateQueries({ queryKey: ["corrections", "mine"] });
+      await qc.invalidateQueries({ queryKey: ["corrections", "mine", "count"] });
     },
     onError: (err) => {
       toast.error(err?.response?.data?.message || err.message || "Reject failed");
@@ -225,17 +269,27 @@ export default function CorrectionsPage() {
         >
           New Request
         </Button>
-        <Button
-          variant={tab === "REVIEW" ? "default" : "outline"}
-          onClick={() => setTab("REVIEW")}
-        >
-          Review Requests
-        </Button>
+        {canReview ? (
+          <Button
+            variant={tab === "REVIEW" ? "default" : "outline"}
+            onClick={() => setTab("REVIEW")}
+            className="inline-flex items-center gap-2"
+          >
+            Review Requests
+            <Badge variant="secondary" className="h-5 px-1.5">
+              {pendingReviewCountQ.data ?? 0}
+            </Badge>
+          </Button>
+        ) : null}
         <Button
           variant={tab === "MINE" ? "default" : "outline"}
           onClick={() => setTab("MINE")}
+          className="inline-flex items-center gap-2"
         >
           My Requests
+          <Badge variant="secondary" className="h-5 px-1.5">
+            {myPendingCountQ.data ?? 0}
+          </Badge>
         </Button>
       </div>
 

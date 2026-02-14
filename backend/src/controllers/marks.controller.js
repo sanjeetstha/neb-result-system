@@ -1,4 +1,8 @@
 const db = require("../db");
+const {
+  getCompulsorySubjectIds,
+  getAllowedOptionalChoicesForEnrollment,
+} = require("../services/subjectSelection.service");
 
 // Upsert marks list for one student enrollment in one exam
 async function upsertMarks(req, res) {
@@ -51,34 +55,41 @@ async function getStudentMarkLedger(req, res) {
 
   try {
     // fetch all components relevant to student (compulsory + optionals)
-    const [profileRows] = await db.query(
+    const [[enrollment]] = await db.query(
       `SELECT e.academic_year_id, e.class_id
        FROM student_enrollments e WHERE e.id=? LIMIT 1`,
       [enrollmentId]
     );
-    if (profileRows.length === 0) return res.status(404).json({ ok: false, message: "Enrollment not found" });
+    if (!enrollment) return res.status(404).json({ ok: false, message: "Enrollment not found" });
 
-    // get compulsory subjects
-    const [[cg]] = await db.query(
-      `SELECT id FROM catalog_groups
-       WHERE academic_year_id <=> ? AND class_id <=> ? AND faculty_id IS NULL AND name='COMPULSORY'
-       LIMIT 1`,
-      [profileRows[0].academic_year_id, profileRows[0].class_id]
+    const compulsoryIds = await getCompulsorySubjectIds(
+      enrollment.academic_year_id,
+      enrollment.class_id
     );
-
-    let subjectIds = [];
-    if (cg) {
-      const [cs] = await db.query(`SELECT subject_id FROM catalog_group_subjects WHERE catalog_group_id=?`, [cg.id]);
-      subjectIds.push(...cs.map(x => x.subject_id));
-    }
-
-    // optionals
-    const [ops] = await db.query(`SELECT subject_id FROM student_optional_choices WHERE enrollment_id=?`, [enrollmentId]);
-    subjectIds.push(...ops.map(x => x.subject_id));
-    subjectIds = [...new Set(subjectIds)];
+    const [rawChoices] = await db.query(
+      `SELECT group_name, subject_id
+       FROM student_optional_choices
+       WHERE enrollment_id=?`,
+      [enrollmentId]
+    );
+    const normalizedOptional = await getAllowedOptionalChoicesForEnrollment(
+      enrollmentId,
+      rawChoices
+    );
+    const optionalIds = normalizedOptional.choices
+      .map((c) => Number(c.subject_id))
+      .filter(Boolean);
+    const subjectIds = [...new Set([...compulsoryIds, ...optionalIds])];
 
     if (subjectIds.length === 0) {
-      return res.json({ ok: true, exam_id: examId, enrollment_id: enrollmentId, ledger: [] });
+      return res.json({
+        ok: true,
+        exam_id: examId,
+        enrollment_id: enrollmentId,
+        optional_choices: normalizedOptional.choices,
+        optional_choice_codes: [],
+        ledger: [],
+      });
     }
 
     const [components] = await db.query(
@@ -123,7 +134,35 @@ async function getStudentMarkLedger(req, res) {
       };
     });
 
-    res.json({ ok: true, exam_id: examId, enrollment_id: enrollmentId, ledger: out });
+    const thCodeBySubjectId = new Map();
+    const subjectNameById = new Map();
+    for (const c of components) {
+      const sid = Number(c.subject_id);
+      if (!sid) continue;
+      if (!subjectNameById.has(sid)) subjectNameById.set(sid, c.subject_name || "");
+      if (String(c.component_type || "").toUpperCase() === "TH" && !thCodeBySubjectId.has(sid)) {
+        thCodeBySubjectId.set(sid, String(c.component_code || "").trim());
+      }
+    }
+
+    const optionalChoiceCodes = normalizedOptional.choices.map((ch) => {
+      const sid = Number(ch.subject_id);
+      return {
+        group_name: ch.group_name,
+        subject_id: sid,
+        subject_name: subjectNameById.get(sid) || "",
+        component_code: thCodeBySubjectId.get(sid) || null,
+      };
+    });
+
+    res.json({
+      ok: true,
+      exam_id: examId,
+      enrollment_id: enrollmentId,
+      optional_choices: normalizedOptional.choices,
+      optional_choice_codes: optionalChoiceCodes,
+      ledger: out,
+    });
   } catch (e) {
     res.status(500).json({ ok: false, message: e?.message || "Failed to load ledger" });
   }

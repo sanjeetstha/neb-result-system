@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
 import { usePagination } from "../../lib/usePagination";
+import { Trash2 } from "lucide-react";
 
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -50,6 +51,9 @@ export default function BatchesPage() {
   const [open, setOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteId, setDeleteId] = useState(null);
+  const [deletePassword, setDeletePassword] = useState("");
 
   const [form, setForm] = useState({
     name: "",
@@ -107,6 +111,23 @@ export default function BatchesPage() {
     },
     onError: (err) => {
       toast.error(err?.response?.data?.message || "Failed to update batch");
+    },
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: async ({ id, password }) => {
+      const res = await api.delete(`/api/masters/batches/${id}`, { data: { password } });
+      return res.data;
+    },
+    onSuccess: async (data) => {
+      toast.success(data?.message || "Batch deleted");
+      setDeleteOpen(false);
+      setDeleteId(null);
+      setDeletePassword("");
+      await qc.invalidateQueries({ queryKey: ["masters", "batches"] });
+    },
+    onError: (err) => {
+      toast.error(err?.response?.data?.message || "Failed to delete batch");
     },
   });
 
@@ -197,9 +218,23 @@ export default function BatchesPage() {
                   )}
                 </TableCell>
                 <TableCell className="text-right">
-                  <Button size="sm" variant="outline" onClick={() => startEdit(row)}>
-                    Edit
-                  </Button>
+                  <div className="inline-flex items-center gap-2">
+                    <Button size="sm" variant="outline" onClick={() => startEdit(row)}>
+                      Edit
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label="Delete batch"
+                      onClick={() => {
+                        setDeleteId(row.id);
+                        setDeletePassword("");
+                        setDeleteOpen(true);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
@@ -238,6 +273,37 @@ export default function BatchesPage() {
               </Button>
               <Button onClick={onUpdate} disabled={updateMut.isPending}>
                 {updateMut.isPending ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove Batch</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="text-sm text-muted-foreground">
+              Enter your password to remove this batch. If this batch still has students, deletion will be blocked.
+            </div>
+            <Input
+              type="password"
+              placeholder="Password"
+              value={deletePassword}
+              onChange={(e) => setDeletePassword(e.target.value)}
+            />
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="secondary" onClick={() => setDeleteOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => deleteMut.mutate({ id: deleteId, password: deletePassword })}
+                disabled={!deleteId || !deletePassword || deleteMut.isPending}
+              >
+                {deleteMut.isPending ? "Removing..." : "Remove Batch"}
               </Button>
             </div>
           </div>

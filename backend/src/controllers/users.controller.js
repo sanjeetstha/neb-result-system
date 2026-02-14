@@ -108,6 +108,64 @@ async function listUsers(req, res) {
   }
 }
 
+async function listActiveUsers(req, res) {
+  try {
+    const windowMin = Math.max(
+      1,
+      Math.min(120, Number(req.query?.window_min) || 15)
+    );
+    const limit = Math.max(
+      1,
+      Math.min(100, Number(req.query?.limit) || 20)
+    );
+
+    const [rows] = await db.query(
+      `SELECT
+          u.id,
+          u.full_name,
+          r.name AS role,
+          GREATEST(
+            COALESCE(u.last_login_at, '1970-01-01 00:00:00'),
+            COALESCE(al.last_action_at, '1970-01-01 00:00:00')
+          ) AS last_seen_at
+       FROM users u
+       JOIN roles r ON r.id=u.role_id
+       LEFT JOIN (
+         SELECT actor_user_id, MAX(created_at) AS last_action_at
+         FROM audit_logs
+         WHERE created_at >= DATE_SUB(NOW(), INTERVAL ${windowMin} MINUTE)
+         GROUP BY actor_user_id
+       ) al ON al.actor_user_id=u.id
+       WHERE u.is_active=1
+       HAVING last_seen_at >= DATE_SUB(NOW(), INTERVAL ${windowMin} MINUTE)
+       ORDER BY last_seen_at DESC, u.full_name ASC
+       LIMIT ?`,
+      [limit]
+    );
+
+    const users = rows.map((r) => {
+      const fullName = String(r.full_name || "").trim();
+      const firstName = fullName ? fullName.split(/\s+/)[0] : "User";
+      return {
+        id: r.id,
+        full_name: fullName,
+        first_name: firstName,
+        role: r.role,
+        last_seen_at: r.last_seen_at,
+      };
+    });
+
+    return res.json({
+      ok: true,
+      count: users.length,
+      window_min: windowMin,
+      users,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, message: "Failed to load active users" });
+  }
+}
+
 async function updateUserStatus(req, res) {
   const id = Number(req.params.id);
   const { is_active } = req.body || {};
@@ -139,7 +197,15 @@ async function updateUser(req, res) {
 
   let roleId = null;
   if (role) {
-    const allowed = ["SUPER_ADMIN", "ADMIN", "TEACHER", "STUDENT"];
+    const allowed = [
+      "SUPER_ADMIN",
+      "ADMIN",
+      "TEACHER",
+      "STUDENT",
+      "EXAM_HEAD",
+      "CAMPUS_CHIEF",
+      "ASSISTANT_CAMPUS_CHIEF",
+    ];
     if (!allowed.includes(role)) {
       return res.status(400).json({ ok: false, message: "Invalid role" });
     }
@@ -304,6 +370,7 @@ async function deleteUser(req, res) {
 
 module.exports = {
   listUsers,
+  listActiveUsers,
   updateUserStatus,
   updateUser,
   updateUserPassword,

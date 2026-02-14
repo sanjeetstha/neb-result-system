@@ -1,4 +1,5 @@
 const db = require("../db");
+const { verifyPassword } = require("../utils/crypto");
 
 async function listCampuses(req, res) {
   const [rows] = await db.query(`SELECT * FROM campuses ORDER BY id DESC`);
@@ -45,15 +46,61 @@ async function updateCampus(req, res) {
 
 async function deleteCampus(req, res) {
   const id = Number(req.params.id);
+  const password = String(req.body?.password || "").trim();
   if (!id) return res.status(400).json({ ok: false, message: "Invalid campus id" });
+  if (!password) return res.status(400).json({ ok: false, message: "password required" });
 
+  const [[user]] = await db.query(
+    `SELECT password_hash FROM users WHERE id=? LIMIT 1`,
+    [req.user.uid]
+  );
+  if (!user?.password_hash) {
+    return res.status(401).json({ ok: false, message: "User not found" });
+  }
+  const ok = await verifyPassword(password, user.password_hash);
+  if (!ok) {
+    return res.status(401).json({ ok: false, message: "Invalid password" });
+  }
+
+  const conn = await db.getConnection();
   try {
-    const [result] = await db.query(`DELETE FROM campuses WHERE id=?`, [id]);
-    if (!result.affectedRows) {
+    await conn.beginTransaction();
+
+    const [[campus]] = await conn.query(
+      `SELECT id, code, name FROM campuses WHERE id=? LIMIT 1`,
+      [id]
+    );
+    if (!campus) {
+      await conn.rollback();
       return res.status(404).json({ ok: false, message: "Campus not found" });
     }
+
+    const [result] = await conn.query(`DELETE FROM campuses WHERE id=?`, [id]);
+    if (!result.affectedRows) {
+      await conn.rollback();
+      return res.status(404).json({ ok: false, message: "Campus not found" });
+    }
+
+    await conn.query(
+      `INSERT INTO audit_logs (actor_user_id, action, entity, entity_id, ip_address, user_agent, meta_json)
+       VALUES (?,?,?,?,?,?,?)`,
+      [
+        req.user.uid,
+        "CAMPUS_DELETED",
+        "campuses",
+        String(id),
+        req.ip || null,
+        req.headers["user-agent"] || null,
+        JSON.stringify({
+          campus: { id: campus.id, code: campus.code, name: campus.name },
+        }),
+      ]
+    );
+
+    await conn.commit();
     res.json({ ok: true, message: "Campus deleted" });
   } catch (e) {
+    await conn.rollback();
     if (String(e.message).toLowerCase().includes("foreign key")) {
       return res.status(409).json({
         ok: false,
@@ -61,6 +108,8 @@ async function deleteCampus(req, res) {
       });
     }
     res.status(500).json({ ok: false, message: "Server error" });
+  } finally {
+    conn.release();
   }
 }
 
@@ -232,6 +281,91 @@ async function updateBatch(req, res) {
       return res.status(409).json({ ok: false, message: "Batch already exists" });
     }
     res.status(500).json({ ok: false, message: "Server error" });
+  }
+}
+
+async function deleteBatch(req, res) {
+  const id = Number(req.params.id);
+  const password = String(req.body?.password || "").trim();
+  if (!id) return res.status(400).json({ ok: false, message: "Invalid batch id" });
+  if (!password) return res.status(400).json({ ok: false, message: "password required" });
+
+  const [[user]] = await db.query(
+    `SELECT password_hash FROM users WHERE id=? LIMIT 1`,
+    [req.user.uid]
+  );
+  if (!user?.password_hash) {
+    return res.status(401).json({ ok: false, message: "User not found" });
+  }
+  const ok = await verifyPassword(password, user.password_hash);
+  if (!ok) {
+    return res.status(401).json({ ok: false, message: "Invalid password" });
+  }
+
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [[batch]] = await conn.query(
+      `SELECT id, name, year_bs FROM batches WHERE id=? LIMIT 1`,
+      [id]
+    );
+    if (!batch) {
+      await conn.rollback();
+      return res.status(404).json({ ok: false, message: "Batch not found" });
+    }
+
+    const [[enr]] = await conn.query(
+      `SELECT COUNT(*) AS c FROM student_enrollments WHERE batch_id=?`,
+      [id]
+    );
+    if (Number(enr?.c || 0) > 0) {
+      await conn.rollback();
+      return res.status(409).json({
+        ok: false,
+        message: "Batch has active student enrollments. Delete students first.",
+      });
+    }
+
+    const [rDetachYears] = await conn.query(
+      `UPDATE academic_years SET batch_id=NULL WHERE batch_id=?`,
+      [id]
+    );
+
+    const [rDelete] = await conn.query(`DELETE FROM batches WHERE id=?`, [id]);
+    if (!rDelete.affectedRows) {
+      await conn.rollback();
+      return res.status(404).json({ ok: false, message: "Batch not found" });
+    }
+
+    await conn.query(
+      `INSERT INTO audit_logs (actor_user_id, action, entity, entity_id, ip_address, user_agent, meta_json)
+       VALUES (?,?,?,?,?,?,?)`,
+      [
+        req.user.uid,
+        "BATCH_DELETED",
+        "batches",
+        String(id),
+        req.ip || null,
+        req.headers["user-agent"] || null,
+        JSON.stringify({
+          batch: { id: batch.id, name: batch.name, year_bs: batch.year_bs },
+          detached_academic_years: rDetachYears.affectedRows,
+        }),
+      ]
+    );
+
+    await conn.commit();
+    return res.json({
+      ok: true,
+      message: "Batch deleted",
+      detached_academic_years: rDetachYears.affectedRows,
+    });
+  } catch (e) {
+    await conn.rollback();
+    return res.status(500).json({ ok: false, message: e?.message || "Delete failed" });
+  } finally {
+    conn.release();
   }
 }
 
@@ -515,6 +649,7 @@ module.exports = {
   listBatches,
   createBatch,
   updateBatch,
+  deleteBatch,
   listSections,
   createSection,
   updateSection,

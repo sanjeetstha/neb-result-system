@@ -82,4 +82,28 @@ async function sendPasswordChangedEmail({ to, name }) {
   });
 }
 
-module.exports = { sendInviteEmail, sendPasswordResetEmail, sendPasswordChangedEmail };
+async function sendPublicPortalOtpEmail({ to, name, otp, ttlMinutes }) {
+  const from = process.env.SMTP_FROM || process.env.SMTP_USER;
+  const displayName = process.env.APP_NAME || "NEB Result System";
+
+  const transporter = getTransporter();
+  await transporter.sendMail({
+    from,
+    to,
+    subject: `Public Portal OTP - ${displayName}`,
+    html: `
+      <p>Hello${name ? ` ${name}` : ""},</p>
+      <p>Your one-time password (OTP) for <b>${displayName}</b> public result portal is:</p>
+      <p style="font-size:22px;letter-spacing:4px;font-weight:700;">${otp}</p>
+      <p>This OTP expires in ${ttlMinutes} minute(s).</p>
+      <p>If you did not request this OTP, please ignore this message.</p>
+    `,
+  });
+}
+
+module.exports = {
+  sendInviteEmail,
+  sendPasswordResetEmail,
+  sendPasswordChangedEmail,
+  sendPublicPortalOtpEmail,
+};

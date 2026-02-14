@@ -2,6 +2,7 @@ const router = require("express").Router();
 const { requireAuth, requireRole } = require("../middlewares/auth");
 const {
   listUsers,
+  listActiveUsers,
   updateUserStatus,
   updateUser,
   updateUserPassword,
@@ -9,6 +10,7 @@ const {
 } = require("../controllers/users.controller");
 
 router.get("/", requireAuth, requireRole("SUPER_ADMIN"), listUsers);
+router.get("/active", requireAuth, requireRole("SUPER_ADMIN"), listActiveUsers);
 router.put("/:id/status", requireAuth, requireRole("SUPER_ADMIN"), updateUserStatus);
 router.put("/:id", requireAuth, requireRole("SUPER_ADMIN"), updateUser);
 router.put("/:id/password", requireAuth, requireRole("SUPER_ADMIN"), updateUserPassword);

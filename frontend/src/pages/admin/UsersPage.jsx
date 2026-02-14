@@ -31,6 +31,14 @@ function norm(v) {
   return String(v ?? "").trim();
 }
 
+function roleLabel(role) {
+  const r = String(role || "").trim().toUpperCase();
+  if (r === "EXAM_HEAD") return "Exam Head";
+  if (r === "CAMPUS_CHIEF") return "Campus Chief";
+  if (r === "ASSISTANT_CAMPUS_CHIEF") return "Asst Campus Chief";
+  return r || "—";
+}
+
 export default function UsersPage() {
   const { data: me, isLoading: meLoading } = useMe();
   const qc = useQueryClient();
@@ -271,7 +279,7 @@ export default function UsersPage() {
                         {u.contact_number || "—"}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">{u.role}</Badge>
+                        <Badge variant="outline">{roleLabel(u.role)}</Badge>
                       </TableCell>
                       <TableCell>
                         {u.is_active ? (
@@ -376,6 +384,11 @@ export default function UsersPage() {
                 <option value="SUPER_ADMIN">SUPER_ADMIN</option>
                 <option value="ADMIN">ADMIN</option>
                 <option value="TEACHER">TEACHER</option>
+                <option value="EXAM_HEAD">EXAM_HEAD (Exam Head)</option>
+                <option value="CAMPUS_CHIEF">CAMPUS_CHIEF (Campus Chief)</option>
+                <option value="ASSISTANT_CAMPUS_CHIEF">
+                  ASSISTANT_CAMPUS_CHIEF (Asst Campus Chief)
+                </option>
                 <option value="STUDENT">STUDENT</option>
               </select>
             </div>

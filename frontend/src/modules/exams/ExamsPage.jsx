@@ -10,6 +10,8 @@ import {
   applyPresetToFlatComponents,
   buildComponentsPayloadFromFlat,
   flattenExamGroups,
+  getExamTermPolicy,
+  getPresetDefaults,
   toNumberOrEmpty,
 } from "../../lib/examPresets";
 import { Button } from "../../components/ui/button";
@@ -82,12 +84,9 @@ export default function ExamsPage() {
   });
   const [autoConfig, setAutoConfig] = useState(true);
   const [presetKey, setPresetKey] = useState("FIRST_TERMINAL");
-  const [presetValues, setPresetValues] = useState({
-    full: EXAM_PRESETS.FIRST_TERMINAL.full,
-    optionalFull: EXAM_PRESETS.FIRST_TERMINAL.optionalFull,
-    enableIN: EXAM_PRESETS.FIRST_TERMINAL.enableIN,
-    inFull: EXAM_PRESETS.FIRST_TERMINAL.inFull,
-  });
+  const [presetValues, setPresetValues] = useState(() =>
+    getPresetDefaults("FIRST_TERMINAL", "")
+  );
 
   // Load exams
   const examsQ = useQuery({
@@ -141,17 +140,29 @@ export default function ExamsPage() {
     staleTime: 60_000,
   });
 
+  const selectedClass = useMemo(
+    () => (classesQ.data || []).find((c) => String(c.id) === String(form.class_id)) || null,
+    [classesQ.data, form.class_id]
+  );
+
+  const termPolicy = useMemo(
+    () => getExamTermPolicy(presetKey, selectedClass?.name || ""),
+    [presetKey, selectedClass?.name]
+  );
+
   useEffect(() => {
-    const p = EXAM_PRESETS[presetKey] || EXAM_PRESETS.FIRST_TERMINAL;
+    const p = getPresetDefaults(presetKey, selectedClass?.name || "");
     setPresetValues({
       full: p.full,
       optionalFull: p.optionalFull,
       pass: p.pass,
       optionalPass: p.optionalPass,
       enableIN: p.enableIN,
+      enablePR: p.enablePR,
       inFull: p.inFull,
+      prFull: p.prFull,
     });
-  }, [presetKey]);
+  }, [presetKey, selectedClass?.name]);
 
   useEffect(() => {
     if (!form.campus_id && campusesQ.data?.length) {
@@ -182,6 +193,7 @@ export default function ExamsPage() {
           const full = toNumberOrEmpty(presetValues.full);
           const optionalFull = toNumberOrEmpty(presetValues.optionalFull);
           const inFull = toNumberOrEmpty(presetValues.inFull);
+          const prFull = toNumberOrEmpty(presetValues.prFull);
           const pass = toNumberOrEmpty(presetValues.pass);
           const optionalPass = toNumberOrEmpty(presetValues.optionalPass);
 
@@ -192,13 +204,24 @@ export default function ExamsPage() {
           const res = await api.get(`/api/exams/${examId}/components`);
           const groups = res.data?.groups || [];
           const flat = flattenExamGroups(groups);
+          const effectivePreset = getPresetDefaults(presetKey, selectedClass?.name || "");
           const applied = applyPresetToFlatComponents(flat, {
             full,
             optionalFull,
             pass,
             optionalPass,
-            enableIN: !!presetValues.enableIN,
+            enableIN:
+              termPolicy.forceEnableIN !== null
+                ? !!termPolicy.forceEnableIN
+                : !!presetValues.enableIN,
+            enablePR:
+              termPolicy.forceEnablePR !== null
+                ? !!termPolicy.forceEnablePR
+                : !!presetValues.enablePR,
             inFull,
+            prFull,
+            // Keep preset context for any derived logic
+            key: effectivePreset.key,
           });
           const payload = buildComponentsPayloadFromFlat(applied);
           await api.post(`/api/exams/${examId}/components`, { components: payload });
@@ -409,7 +432,7 @@ export default function ExamsPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Full Marks (TH)</label>
                     <Input
@@ -442,39 +465,90 @@ export default function ExamsPage() {
                     />
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Practical/Internal Full Marks</label>
-                    <Input
-                      type="number"
-                      step="0.25"
-                      value={presetValues.inFull}
-                      onChange={(e) =>
-                        setPresetValues((p) => ({
-                          ...p,
-                          inFull: toNumberOrEmpty(e.target.value),
-                        }))
-                      }
-                      disabled={!presetValues.enableIN}
-                    />
-                  </div>
+                  {termPolicy.showINToggle || termPolicy.forceEnableIN === true ? (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Internal Full Marks</label>
+                      <Input
+                        type="number"
+                        step="0.25"
+                        value={presetValues.inFull}
+                        onChange={(e) =>
+                          setPresetValues((p) => ({
+                            ...p,
+                            inFull: toNumberOrEmpty(e.target.value),
+                          }))
+                        }
+                        disabled={termPolicy.forceEnableIN === false || !presetValues.enableIN}
+                      />
+                    </div>
+                  ) : null}
+
+                  {termPolicy.showPRToggle || termPolicy.forceEnablePR === true ? (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Practical Full Marks</label>
+                      <Input
+                        type="number"
+                        step="0.25"
+                        value={presetValues.prFull}
+                        onChange={(e) =>
+                          setPresetValues((p) => ({
+                            ...p,
+                            prFull: toNumberOrEmpty(e.target.value),
+                          }))
+                        }
+                        disabled={termPolicy.forceEnablePR === false || !presetValues.enablePR}
+                      />
+                    </div>
+                  ) : null}
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={!!presetValues.enableIN}
-                    onChange={(e) =>
-                      setPresetValues((p) => ({
-                        ...p,
-                        enableIN: e.target.checked,
-                      }))
-                    }
-                    className="h-4 w-4"
-                  />
-                  <span className="text-sm text-muted-foreground">
-                    Include Practical/Internal components
-                  </span>
+                <div className="flex flex-wrap items-center gap-4">
+                  {termPolicy.showINToggle ? (
+                    <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={!!presetValues.enableIN}
+                        onChange={(e) =>
+                          setPresetValues((p) => ({
+                            ...p,
+                            enableIN: e.target.checked,
+                          }))
+                        }
+                        className="h-4 w-4"
+                      />
+                      Include Internal (IN)
+                    </label>
+                  ) : null}
+                  {termPolicy.showPRToggle ? (
+                    <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={!!presetValues.enablePR}
+                        onChange={(e) =>
+                          setPresetValues((p) => ({
+                            ...p,
+                            enablePR: e.target.checked,
+                          }))
+                        }
+                        className="h-4 w-4"
+                      />
+                      Include Practical (PR)
+                    </label>
+                  ) : null}
+                  {!termPolicy.showINToggle && termPolicy.forceEnableIN !== null ? (
+                    <Badge variant="outline">
+                      Internal: {termPolicy.forceEnableIN ? "Enabled" : "Disabled"}
+                    </Badge>
+                  ) : null}
+                  {!termPolicy.showPRToggle && termPolicy.forceEnablePR !== null ? (
+                    <Badge variant="outline">
+                      Practical: {termPolicy.forceEnablePR ? "Enabled" : "Disabled"}
+                    </Badge>
+                  ) : null}
                 </div>
+                {termPolicy.note ? (
+                  <div className="text-xs text-muted-foreground">{termPolicy.note}</div>
+                ) : null}
               </div>
 
               <div className="flex justify-end gap-2">
