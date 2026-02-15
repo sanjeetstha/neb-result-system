@@ -23,6 +23,7 @@ import {
   UserCog,
   MessageSquare,
   Printer,
+  BriefcaseBusiness,
 } from "lucide-react";
 
 /**
@@ -107,6 +108,14 @@ export default function Sidebar({
         ],
       },
       {
+        label: "Operations",
+        icon: BriefcaseBusiness,
+        children: [
+          { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
+          { label: "OT Policy", path: "/operations/ot/policy", icon: Settings },
+        ],
+      },
+      {
         label: "Users",
         icon: Users,
         children: [
@@ -151,6 +160,14 @@ export default function Sidebar({
         ],
       },
       {
+        label: "Operations",
+        icon: BriefcaseBusiness,
+        children: [
+          { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
+          { label: "OT Policy", path: "/operations/ot/policy", icon: Settings },
+        ],
+      },
+      {
         label: "Users",
         icon: Users,
         children: [
@@ -190,6 +207,11 @@ export default function Sidebar({
         ],
       },
       {
+        label: "Operations",
+        icon: BriefcaseBusiness,
+        children: [{ label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness }],
+      },
+      {
         label: "Account",
         icon: UserCog,
         children: [{ label: "Profile", path: "/account/profile", icon: UserCog }],
@@ -213,6 +235,11 @@ export default function Sidebar({
           { label: "Marksheet Print", path: "/results/marksheet", icon: Printer },
           { label: "Public Portal", path: "/public/portal", icon: Globe },
         ],
+      },
+      {
+        label: "Operations",
+        icon: BriefcaseBusiness,
+        children: [{ label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness }],
       },
       {
         label: "Account",
@@ -240,6 +267,11 @@ export default function Sidebar({
         ],
       },
       {
+        label: "Operations",
+        icon: BriefcaseBusiness,
+        children: [{ label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness }],
+      },
+      {
         label: "Account",
         icon: UserCog,
         children: [{ label: "Profile", path: "/account/profile", icon: UserCog }],
@@ -263,6 +295,11 @@ export default function Sidebar({
           { label: "Marksheet Print", path: "/results/marksheet", icon: Printer },
           { label: "Public Portal", path: "/public/portal", icon: Globe },
         ],
+      },
+      {
+        label: "Operations",
+        icon: BriefcaseBusiness,
+        children: [{ label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness }],
       },
       {
         label: "Account",

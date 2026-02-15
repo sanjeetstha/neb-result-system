@@ -101,11 +101,11 @@ export default function LoginPage() {
 
             <div className="mt-10 space-y-4">
               <div className="text-3xl font-semibold font-display leading-tight">
-                Simple, calm, and ready for results.
+                Campus operations, in one unified workspace.
               </div>
               <p className="text-muted-foreground">
-                Manage NEB +2 exams, enter marks faster, and publish results for
-                students and guardians with confidence.
+                Manage NEB results, OT claims, and approval workflows with a
+                reliable and role-based system.
               </p>
             </div>
           </div>
@@ -113,15 +113,15 @@ export default function LoginPage() {
           <div className="space-y-3 text-sm text-muted-foreground">
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-primary" />
-              Bulk grid entry + Excel import
+              Result module: bulk grid + Excel import
             </div>
             <div className="flex items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-primary" />
-              Terminal-wise exam setup + corrections
+              Workflow module: approvals + corrections
             </div>
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-primary" />
-              Public result portal + SMS delivery
+              Operations module: OT claim + policy controls
             </div>
           </div>
         </div>

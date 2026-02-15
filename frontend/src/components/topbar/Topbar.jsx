@@ -69,7 +69,7 @@ export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed,
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
   const isActive = me?.is_active !== false;
   const topbarTitle =
-    String(settings.topbar_title_np || "").trim() || "Result Management System";
+    String(settings.topbar_title_np || "").trim() || "Campus Operations Management System";
   const topbarTitleSize = Math.max(
     14,
     Math.min(36, Number(settings.topbar_title_size) || 20)

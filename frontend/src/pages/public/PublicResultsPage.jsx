@@ -58,8 +58,9 @@ export default function PublicResultsPage() {
                 {settings.org_name || "NEB Result System"}
               </h1>
               <p className="mt-2 text-sm text-muted-foreground max-w-lg">
-                Search published results by exam, symbol number, and date of birth.
-                No internal modules are available in this public session.
+                Search published results by exam and registration number. Date of birth
+                is optional for confirmation only. No internal modules are available in
+                this public session.
               </p>
 
               <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">

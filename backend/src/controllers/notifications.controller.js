@@ -213,6 +213,113 @@ async function listMyNotifications(req, res) {
       }
     }
 
+    // OT Claim workflow notifications
+    try {
+      if (role === "EXAM_HEAD" || role === "ADMIN" || role === "SUPER_ADMIN") {
+        const params = [];
+        let campusWhere = "";
+        if (campusId) {
+          campusWhere = "AND (c.campus_id=? OR c.campus_id IS NULL)";
+          params.push(campusId);
+        }
+        params.push(limit);
+        const [rows] = await db.query(
+          `SELECT c.id, c.claim_no, c.claim_month, c.submitted_at, c.updated_at, u.full_name
+           FROM ot_claims c
+           JOIN users u ON u.id=c.staff_user_id
+           WHERE c.status='SUBMITTED'
+             ${campusWhere}
+           ORDER BY COALESCE(c.submitted_at, c.updated_at) DESC, c.id DESC
+           LIMIT ?`,
+          params
+        );
+        for (const r of rows) {
+          push(notifications, {
+            id: `otverify:${r.id}`,
+            type: "OT_VERIFY",
+            title: "OT Verification Required",
+            message: `${r.claim_no || `Claim #${r.id}`} • ${r.full_name} (${r.claim_month})`,
+            action_path: `/operations/ot?scope=pending_verify&claim_id=${r.id}`,
+            action_label: "Review OT",
+            created_at: r.submitted_at || r.updated_at,
+            priority: "high",
+          });
+        }
+      }
+    } catch {
+      // OT module not initialized yet.
+    }
+
+    try {
+      if (
+        role === "CAMPUS_CHIEF" ||
+        role === "ASSISTANT_CAMPUS_CHIEF" ||
+        role === "ADMIN" ||
+        role === "SUPER_ADMIN"
+      ) {
+        const params = [];
+        let campusWhere = "";
+        if (campusId) {
+          campusWhere = "AND (c.campus_id=? OR c.campus_id IS NULL)";
+          params.push(campusId);
+        }
+        params.push(limit);
+        const [rows] = await db.query(
+          `SELECT c.id, c.claim_no, c.claim_month, c.verified_at, c.updated_at, u.full_name
+           FROM ot_claims c
+           JOIN users u ON u.id=c.staff_user_id
+           WHERE c.status='VERIFIED'
+             ${campusWhere}
+           ORDER BY COALESCE(c.verified_at, c.updated_at) DESC, c.id DESC
+           LIMIT ?`,
+          params
+        );
+        for (const r of rows) {
+          push(notifications, {
+            id: `otapprove:${r.id}`,
+            type: "OT_APPROVE",
+            title: "OT Approval Required",
+            message: `${r.claim_no || `Claim #${r.id}`} • ${r.full_name} (${r.claim_month})`,
+            action_path: `/operations/ot?scope=pending_approve&claim_id=${r.id}`,
+            action_label: "Approve OT",
+            created_at: r.verified_at || r.updated_at,
+            priority: "high",
+          });
+        }
+      }
+    } catch {
+      // OT module not initialized yet.
+    }
+
+    try {
+      if (role === "TEACHER") {
+        const [rows] = await db.query(
+          `SELECT c.id, c.claim_no, c.claim_month, c.status, c.updated_at
+           FROM ot_claims c
+           WHERE c.staff_user_id=?
+             AND c.status IN ('APPROVED','REJECTED')
+             AND c.updated_at >= DATE_SUB(NOW(), INTERVAL 14 DAY)
+           ORDER BY c.updated_at DESC
+           LIMIT ?`,
+          [uid, limit]
+        );
+        for (const r of rows) {
+          push(notifications, {
+            id: `otmine:${r.id}`,
+            type: "OT_STATUS",
+            title: `OT Claim ${String(r.status).toLowerCase()}`,
+            message: `${r.claim_no || `Claim #${r.id}`} (${r.claim_month})`,
+            action_path: `/operations/ot?scope=my&claim_id=${r.id}`,
+            action_label: "Open Claim",
+            created_at: r.updated_at,
+            priority: "normal",
+          });
+        }
+      }
+    } catch {
+      // OT module not initialized yet.
+    }
+
     notifications.sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
@@ -232,4 +339,3 @@ async function listMyNotifications(req, res) {
 }
 
 module.exports = { listMyNotifications };
-

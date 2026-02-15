@@ -3,6 +3,7 @@ const { requirePublicPortalAccess } = require("../middlewares/auth");
 
 const {
   listPublishedExams,
+  listPublishedStudentsByExam,
   searchPublishedResult,
   getPublishedResultByPath,
 } = require("../controllers/public.controller");
@@ -26,6 +27,7 @@ router.get("/auth/session", requirePublicPortalAccess, getPublicSession);
 
 // Public discovery (session protected)
 router.get("/exams", requirePublicPortalAccess, listPublishedExams);
+router.get("/students", requirePublicPortalAccess, listPublishedStudentsByExam);
 router.post("/results/search", requirePublicPortalAccess, searchPublishedResult);
 router.get(
   "/results/:examId/:symbolNo",

@@ -21,13 +21,53 @@ async function listPublishedExams(req, res) {
   res.json({ ok: true, exams: rows });
 }
 
+async function listPublishedStudentsByExam(req, res) {
+  const exam_id = Number(req.query?.exam_id);
+  if (!exam_id) {
+    return res.status(400).json({ ok: false, message: "exam_id required" });
+  }
+
+  const [[exam]] = await db.query(
+    `SELECT id
+     FROM exams
+     WHERE id=? AND published_at IS NOT NULL AND is_locked=1
+     LIMIT 1`,
+    [exam_id]
+  );
+  if (!exam) {
+    return res.status(404).json({ ok: false, message: "Published exam not found" });
+  }
+
+  const [rows] = await db.query(
+    `SELECT DISTINCT
+        s.regd_no,
+        s.full_name,
+        s.symbol_no,
+        s.dob
+     FROM result_snapshots rs
+     JOIN student_enrollments e ON e.id=rs.enrollment_id
+     JOIN students s ON s.id=e.student_id
+     WHERE rs.exam_id=? AND rs.published_at IS NOT NULL
+     ORDER BY
+       CASE WHEN s.regd_no IS NULL OR s.regd_no='' THEN 1 ELSE 0 END ASC,
+       s.regd_no ASC,
+       s.full_name ASC`,
+    [exam_id]
+  );
+
+  return res.json({ ok: true, students: rows });
+}
+
 async function searchPublishedResult(req, res) {
   const exam_id = Number(req.body?.exam_id);
-  const symbol_no = norm(req.body?.symbol_no);
-  const dob = norm(req.body?.dob); // expect YYYY-MM-DD
+  const regd_no = norm(req.body?.regd_no);
+  const symbol_no = norm(req.body?.symbol_no); // backward compatible fallback
+  const dob = norm(req.body?.dob); // optional confirmation
 
-  if (!exam_id || !symbol_no || !dob) {
-    return res.status(400).json({ ok: false, message: "exam_id, symbol_no, dob (YYYY-MM-DD) required" });
+  if (!exam_id || (!regd_no && !symbol_no)) {
+    return res
+      .status(400)
+      .json({ ok: false, message: "exam_id and regd_no are required (symbol_no accepted as fallback)" });
   }
 
   // ensure exam is published/locked
@@ -37,6 +77,14 @@ async function searchPublishedResult(req, res) {
   );
   if (!exam) return res.status(404).json({ ok: false, message: "Published exam not found" });
 
+  let where =
+    `rs.exam_id=? AND rs.published_at IS NOT NULL AND (s.regd_no=? OR s.symbol_no=?)`;
+  const params = [exam_id, regd_no, symbol_no || regd_no];
+  if (dob) {
+    where += ` AND DATE(s.dob)=DATE(?)`;
+    params.push(dob);
+  }
+
   // find published snapshot for this student (symbol + dob)
   const [rows] = await db.query(
     `SELECT rs.payload_json, rs.overall_gpa, rs.final_grade, rs.result_status, rs.published_at,
@@ -44,14 +92,15 @@ async function searchPublishedResult(req, res) {
      FROM result_snapshots rs
      JOIN student_enrollments e ON e.id=rs.enrollment_id
      JOIN students s ON s.id=e.student_id
-     WHERE rs.exam_id=? AND rs.published_at IS NOT NULL
-       AND s.symbol_no=? AND DATE(s.dob)=DATE(?)
+     WHERE ${where}
      LIMIT 1`,
-    [exam_id, symbol_no, dob]
+    params
   );
 
   if (!rows.length) {
-    return res.status(404).json({ ok: false, message: "Result not found (check symbol no / DOB / exam)" });
+    return res
+      .status(404)
+      .json({ ok: false, message: "Result not found (check registration no / optional DOB / exam)" });
   }
 
   const r = rows[0];
@@ -87,4 +136,9 @@ async function getPublishedResultByPath(req, res) {
   return searchPublishedResult(req, res);
 }
 
-module.exports = { listPublishedExams, searchPublishedResult, getPublishedResultByPath };
+module.exports = {
+  listPublishedExams,
+  listPublishedStudentsByExam,
+  searchPublishedResult,
+  getPublishedResultByPath,
+};

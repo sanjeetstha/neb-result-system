@@ -7,6 +7,7 @@ import {
   BarChart3,
   BadgeCheck,
   Globe,
+  BriefcaseBusiness,
 } from "lucide-react";
 
 export const MENUS = {
@@ -20,6 +21,8 @@ export const MENUS = {
     { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
     { label: "Reports", path: "/reports", icon: BarChart3 },
     { label: "Corrections", path: "/corrections", icon: BadgeCheck },
+    { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
+    { label: "OT Policy", path: "/operations/ot/policy", icon: BriefcaseBusiness },
     { label: "Public Portal", path: "/public/portal", icon: Globe },
     // { label: "Marks New", path: "/marks/student", icon: PencilRuler },
     
@@ -33,30 +36,36 @@ export const MENUS = {
     { label: "Marks Entry", path: "/marks", icon: PencilRuler },
     { label: "Reports", path: "/reports", icon: BarChart3 },
     { label: "Corrections", path: "/corrections", icon: BadgeCheck },
+    { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
+    { label: "OT Policy", path: "/operations/ot/policy", icon: BriefcaseBusiness },
   ],
   TEACHER: [
     { label: "Dashboard", path: "/", icon: LayoutDashboard },
     { label: "Marks Entry", path: "/marks", icon: PencilRuler },
     { label: "Corrections", path: "/corrections", icon: BadgeCheck },
     { label: "Reports", path: "/reports", icon: BarChart3 },
+    { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
   ],
   EXAM_HEAD: [
     { label: "Dashboard", path: "/", icon: LayoutDashboard },
     { label: "Exams", path: "/exams", icon: ClipboardList },
     { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
     { label: "Reports", path: "/reports", icon: BarChart3 },
+    { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
   ],
   CAMPUS_CHIEF: [
     { label: "Dashboard", path: "/", icon: LayoutDashboard },
     { label: "Exams", path: "/exams", icon: ClipboardList },
     { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
     { label: "Reports", path: "/reports", icon: BarChart3 },
+    { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
   ],
   ASSISTANT_CAMPUS_CHIEF: [
     { label: "Dashboard", path: "/", icon: LayoutDashboard },
     { label: "Exams", path: "/exams", icon: ClipboardList },
     { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
     { label: "Reports", path: "/reports", icon: BarChart3 },
+    { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
   ],
   STUDENT: [
     { label: "Dashboard", path: "/", icon: LayoutDashboard },

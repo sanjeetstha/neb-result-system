@@ -13,9 +13,15 @@ function norm(v) {
   return String(v ?? "").trim();
 }
 
+function dateOnly(v) {
+  if (!v) return "";
+  const s = String(v);
+  return s.length >= 10 ? s.slice(0, 10) : s;
+}
+
 export default function ResultsSearchPage({ title = "Result Portal", variant = "default" }) {
   const [examId, setExamId] = useState("");
-  const [symbolNo, setSymbolNo] = useState("");
+  const [regdNo, setRegdNo] = useState("");
   const [dob, setDob] = useState("");
   const [result, setResult] = useState(null);
   const [downloading, setDownloading] = useState("");
@@ -37,13 +43,35 @@ export default function ResultsSearchPage({ title = "Result Portal", variant = "
     }));
   }, [examsQ.data]);
 
+  const studentsQ = useQuery({
+    queryKey: ["public", "students", examId],
+    queryFn: async () => {
+      const res = await publicApi.get("/api/public/students", {
+        params: { exam_id: Number(examId) },
+      });
+      const data = res.data?.students ?? res.data?.data ?? [];
+      return Array.isArray(data) ? data : [];
+    },
+    enabled: Boolean(examId),
+    staleTime: 30_000,
+  });
+
+  const regdOptions = useMemo(() => {
+    return (studentsQ.data || [])
+      .map((s) => ({
+        regd_no: String(s.regd_no || "").trim(),
+        full_name: s.full_name,
+      }))
+      .filter((s) => s.regd_no);
+  }, [studentsQ.data]);
+
   const searchMutation = useMutation({
     mutationFn: async () => {
       const payload = {
         exam_id: Number(examId),
-        symbol_no: norm(symbolNo),
-        dob: norm(dob),
+        regd_no: norm(regdNo),
       };
+      if (norm(dob)) payload.dob = norm(dob);
       const res = await publicApi.post("/api/public/results/search", payload);
       return res.data;
     },
@@ -63,21 +91,28 @@ export default function ResultsSearchPage({ title = "Result Portal", variant = "
   const payload = result?.result || {};
   const subjects = Array.isArray(payload?.subjects) ? payload.subjects : [];
 
-  const canDownload = Boolean(examId && symbolNo && dob);
+  const resultSymbolNo = norm(result?.student?.symbol_no);
+  const effectiveDob = norm(dob) || dateOnly(result?.student?.dob);
+  const canDownloadMarksheet = Boolean(examId && resultSymbolNo);
+  const canDownloadTranscript = Boolean(examId && resultSymbolNo && effectiveDob);
 
   const compact = variant === "compact";
 
   const openPdf = async (type) => {
-    if (!canDownload || downloading) return;
+    if (!canDownloadMarksheet || downloading) return;
     const isMarksheet = type === "marksheet";
+    if (!isMarksheet && !canDownloadTranscript) {
+      toast.error("Date of birth is required to open transcript.");
+      return;
+    }
     const endpoint = isMarksheet ? "/api/public/marksheet.pdf" : "/api/public/transcript.pdf";
     setDownloading(type);
     try {
       const res = await publicApi.get(endpoint, {
         params: {
           exam_id: Number(examId),
-          symbol_no: norm(symbolNo),
-          dob: norm(dob),
+          symbol_no: resultSymbolNo,
+          ...(type === "transcript" || effectiveDob ? { dob: effectiveDob } : {}),
         },
         responseType: "blob",
       });
@@ -112,7 +147,7 @@ export default function ResultsSearchPage({ title = "Result Portal", variant = "
         <div>
           <h2 className="text-lg font-semibold">{title}</h2>
           <p className="text-sm text-muted-foreground">
-            Search published results by exam, symbol number and date of birth.
+            Search published results by exam and registration number. Date of birth is optional for confirmation.
           </p>
         </div>
       ) : null}
@@ -125,7 +160,12 @@ export default function ResultsSearchPage({ title = "Result Portal", variant = "
               <select
                 className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                 value={examId}
-                onChange={(e) => setExamId(e.target.value)}
+                onChange={(e) => {
+                  setExamId(e.target.value);
+                  setRegdNo("");
+                  setDob("");
+                  setResult(null);
+                }}
               >
                 <option value="">
                   {examsQ.isLoading ? "Loading..." : "Select exam"}
@@ -139,16 +179,24 @@ export default function ResultsSearchPage({ title = "Result Portal", variant = "
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">Symbol No.</label>
+              <label className="text-sm font-medium">Registration No.</label>
               <Input
-                placeholder="e.g. 823220060001"
-                value={symbolNo}
-                onChange={(e) => setSymbolNo(e.target.value)}
+                placeholder="Enter registration number"
+                value={regdNo}
+                onChange={(e) => setRegdNo(e.target.value)}
+                list="public-regd-no-list"
               />
+              <datalist id="public-regd-no-list">
+                {regdOptions.map((s) => (
+                  <option key={`${s.regd_no}-${s.full_name || ""}`} value={s.regd_no}>
+                    {s.full_name || ""}
+                  </option>
+                ))}
+              </datalist>
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">Date of Birth</label>
+              <label className="text-sm font-medium">Date of Birth (Optional)</label>
               <Input
                 type="date"
                 value={dob}
@@ -157,10 +205,18 @@ export default function ResultsSearchPage({ title = "Result Portal", variant = "
             </div>
           </div>
 
+          {examId ? (
+            <div className="text-xs text-muted-foreground">
+              {studentsQ.isLoading
+                ? "Indexing students..."
+                : `Indexed ${(studentsQ.data || []).length} published student record(s) for this exam.`}
+            </div>
+          ) : null}
+
           <div className="flex justify-end gap-2">
             <Button
               onClick={() => searchMutation.mutate()}
-              disabled={!examId || !symbolNo || !dob || searchMutation.isPending}
+              disabled={!examId || !regdNo || searchMutation.isPending}
             >
               {searchMutation.isPending ? "Searching..." : "Search Result"}
             </Button>
@@ -177,6 +233,9 @@ export default function ResultsSearchPage({ title = "Result Portal", variant = "
               </Badge>
               <Badge variant="outline">
                 Symbol: {result?.student?.symbol_no || "—"}
+              </Badge>
+              <Badge variant="outline">
+                Regd: {result?.student?.regd_no || "—"}
               </Badge>
               <Badge variant="outline">
                 Result: {resultSummary?.result_status || payload?.result_status || "—"}
@@ -241,7 +300,7 @@ export default function ResultsSearchPage({ title = "Result Portal", variant = "
               </table>
             </div>
 
-            {canDownload ? (
+            {canDownloadMarksheet ? (
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
@@ -254,7 +313,7 @@ export default function ResultsSearchPage({ title = "Result Portal", variant = "
                 <Button
                   type="button"
                   variant="outline"
-                  disabled={!!downloading}
+                  disabled={!!downloading || !canDownloadTranscript}
                   onClick={() => openPdf("transcript")}
                 >
                   {downloading === "transcript" ? "Opening..." : "Open Transcript (PDF)"}

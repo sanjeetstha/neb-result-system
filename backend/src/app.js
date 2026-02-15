@@ -20,6 +20,7 @@ const inviteRoutes = require("./routes/invites.routes");
 const usersRoutes = require("./routes/users.routes");
 const smsRoutes = require("./routes/sms.routes");
 const notificationsRoutes = require("./routes/notifications.routes");
+const otRoutes = require("./routes/ot.routes");
 
 app.use(helmet());
 app.use(cors());
@@ -45,6 +46,7 @@ app.use("/api/invites", inviteRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/sms", smsRoutes);
 app.use("/api/notifications", notificationsRoutes);
+app.use("/api/ot", otRoutes);
 
 
 app.get("/api/health", async (req, res) => {

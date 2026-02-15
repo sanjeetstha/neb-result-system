@@ -89,6 +89,7 @@ export default function PublicPortalAccessPage() {
     <div className="mx-auto max-w-3xl px-4 py-8 space-y-6">
       <div className="space-y-2">
         <Badge variant="secondary">General Public Portal</Badge>
+        <h1 className="text-2xl font-semibold">Gaurishankar Multiple Campus</h1>
         <h1 className="text-2xl font-semibold">Access Published Results</h1>
         <p className="text-sm text-muted-foreground">
           No account required. Enter your details, verify OTP, then access published

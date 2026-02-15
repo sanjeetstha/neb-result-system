@@ -35,6 +35,8 @@ import CorrectionsPage from "../pages/corrections/CorrectionsPage";
 import ProfilePage from "../pages/account/ProfilePage";
 import BulkSmsPage from "../pages/results/BulkSmsPage";
 import MarksheetPrintPage from "../pages/results/MarksheetPrintPage";
+import OtClaimsPage from "../modules/operations/OtClaimsPage";
+import OtPolicyPage from "../modules/operations/OtPolicyPage";
 
 export default function AppRouter() {
   return (
@@ -96,6 +98,8 @@ export default function AppRouter() {
         <Route path="corrections" element={<CorrectionsPage />} />
         <Route path="results/sms" element={<BulkSmsPage />} />
         <Route path="results/marksheet" element={<MarksheetPrintPage />} />
+        <Route path="operations/ot" element={<OtClaimsPage />} />
+        <Route path="operations/ot/policy" element={<OtPolicyPage />} />
         <Route path="public" element={<Navigate to="/public/portal" replace />} />
         <Route path="my-results" element={<MyResultsPage />} />
       </Route>

@@ -3,11 +3,11 @@ import { useEffect, useState } from "react";
 const KEY = "app_settings";
 
 const DEFAULTS = {
-  brand_name: "NEB Result System",
+  brand_name: "Campus Operations Management System",
   topbar_title_np: "",
   topbar_title_size: 20,
   org_name: "Gaurishankar Multiple Campus",
-  tagline: "NEB +2 Result Management",
+  tagline: "Results, Operations, and Campus Workflow in one platform",
   logo_data_url: "",
   logo_small_data_url: "",
   favicon_data_url: "",
@@ -19,7 +19,8 @@ const DEFAULTS = {
   sidebar_color: "#0c2c55",
   header_style: "glass", // glass | solid
   notice_enabled: true,
-  notice_text: "नेब नतिजा प्रणालीमा स्वागत छ • नतिजा प्रकाशन विश्वसनीय र छिटो बनाऔं •",
+  notice_text:
+    "क्याम्पस अपरेसन्स व्यवस्थापन प्रणालीमा स्वागत छ • नतिजा र प्रशासनिक कार्यप्रवाहलाई एकै स्थानबाट सञ्चालन गरौं •",
   notice_text_size: 13,
   notice_speed: 28,
   notice_style: "gradient", // solid | gradient
