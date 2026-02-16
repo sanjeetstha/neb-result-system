@@ -33,6 +33,7 @@ function norm(v) {
 
 function roleLabel(role) {
   const r = String(role || "").trim().toUpperCase();
+  if (r === "FINANCE") return "Finance";
   if (r === "EXAM_HEAD") return "Exam Head";
   if (r === "CAMPUS_CHIEF") return "Campus Chief";
   if (r === "ASSISTANT_CAMPUS_CHIEF") return "Asst Campus Chief";
@@ -383,6 +384,7 @@ export default function UsersPage() {
               >
                 <option value="SUPER_ADMIN">SUPER_ADMIN</option>
                 <option value="ADMIN">ADMIN</option>
+                <option value="FINANCE">FINANCE</option>
                 <option value="TEACHER">TEACHER</option>
                 <option value="EXAM_HEAD">EXAM_HEAD (Exam Head)</option>
                 <option value="CAMPUS_CHIEF">CAMPUS_CHIEF (Campus Chief)</option>

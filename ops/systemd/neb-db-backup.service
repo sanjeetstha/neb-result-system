@@ -7,15 +7,23 @@ After=network-online.target
 Type=oneshot
 WorkingDirectory=/srv/apps/neb-result-system/backend
 Environment=ENV_FILE=/srv/apps/neb-result-system/backend/.env
-Environment=BACKUP_DIR=/srv/apps/neb-result-system/backups
-Environment=RETENTION_DAYS=14
+Environment=BACKUP_CONFIG_FILE=/srv/apps/neb-result-system/backend/.backup.env
+Environment=BACKUP_ROOT=/srv/backups/neb-result-system
+Environment=RETENTION_DAYS=30
+Environment=KEEP_LAST=120
+ExecStartPre=/usr/bin/mkdir -p /srv/backups/neb-result-system
 ExecStart=/bin/bash /srv/apps/neb-result-system/backend/scripts/db_backup.sh
 
 # Optional hardening
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
+ReadWritePaths=/srv/backups /srv/apps/neb-result-system/backend
 
 [Install]
 WantedBy=multi-user.target

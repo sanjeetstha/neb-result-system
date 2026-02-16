@@ -46,12 +46,15 @@ export const MENUS = {
     { label: "Reports", path: "/reports", icon: BarChart3 },
     { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
   ],
+  FINANCE: [
+    { label: "Dashboard", path: "/", icon: LayoutDashboard },
+    { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
+  ],
   EXAM_HEAD: [
     { label: "Dashboard", path: "/", icon: LayoutDashboard },
     { label: "Exams", path: "/exams", icon: ClipboardList },
     { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
     { label: "Reports", path: "/reports", icon: BarChart3 },
-    { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
   ],
   CAMPUS_CHIEF: [
     { label: "Dashboard", path: "/", icon: LayoutDashboard },
@@ -65,7 +68,6 @@ export const MENUS = {
     { label: "Exams", path: "/exams", icon: ClipboardList },
     { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
     { label: "Reports", path: "/reports", icon: BarChart3 },
-    { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
   ],
   STUDENT: [
     { label: "Dashboard", path: "/", icon: LayoutDashboard },

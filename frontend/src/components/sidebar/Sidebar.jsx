@@ -217,6 +217,19 @@ export default function Sidebar({
         children: [{ label: "Profile", path: "/account/profile", icon: UserCog }],
       },
     ],
+    FINANCE: [
+      { label: "Dashboard", path: "/", icon: LayoutDashboard },
+      {
+        label: "Operations",
+        icon: BriefcaseBusiness,
+        children: [{ label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness }],
+      },
+      {
+        label: "Account",
+        icon: UserCog,
+        children: [{ label: "Profile", path: "/account/profile", icon: UserCog }],
+      },
+    ],
     EXAM_HEAD: [
       { label: "Dashboard", path: "/", icon: LayoutDashboard },
       {
@@ -235,11 +248,6 @@ export default function Sidebar({
           { label: "Marksheet Print", path: "/results/marksheet", icon: Printer },
           { label: "Public Portal", path: "/public/portal", icon: Globe },
         ],
-      },
-      {
-        label: "Operations",
-        icon: BriefcaseBusiness,
-        children: [{ label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness }],
       },
       {
         label: "Account",
@@ -295,11 +303,6 @@ export default function Sidebar({
           { label: "Marksheet Print", path: "/results/marksheet", icon: Printer },
           { label: "Public Portal", path: "/public/portal", icon: Globe },
         ],
-      },
-      {
-        label: "Operations",
-        icon: BriefcaseBusiness,
-        children: [{ label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness }],
       },
       {
         label: "Account",

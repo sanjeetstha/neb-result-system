@@ -61,6 +61,7 @@ export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed,
   const canQuickActions = [
     "SUPER_ADMIN",
     "ADMIN",
+    "FINANCE",
     "TEACHER",
     "EXAM_HEAD",
     "CAMPUS_CHIEF",

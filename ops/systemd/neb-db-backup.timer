@@ -1,10 +1,11 @@
 [Unit]
-Description=Daily NEB Result System DB Backup
+Description=Automatic NEB Result System DB Backup
 
 [Timer]
-OnCalendar=*-*-* 02:10:00
+OnCalendar=*-*-* 00,06,12,18:15:00
 Persistent=true
-RandomizedDelaySec=20m
+RandomizedDelaySec=15m
+AccuracySec=1m
 
 [Install]
 WantedBy=timers.target

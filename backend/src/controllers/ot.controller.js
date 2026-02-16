@@ -5,18 +5,12 @@ let otSchemaReady = null;
 const INTERNAL_STAFF_ROLES = new Set([
   "SUPER_ADMIN",
   "ADMIN",
+  "FINANCE",
   "TEACHER",
-  "EXAM_HEAD",
   "CAMPUS_CHIEF",
-  "ASSISTANT_CAMPUS_CHIEF",
 ]);
-const VERIFY_ROLES = new Set(["SUPER_ADMIN", "ADMIN", "EXAM_HEAD"]);
-const APPROVE_ROLES = new Set([
-  "SUPER_ADMIN",
-  "ADMIN",
-  "CAMPUS_CHIEF",
-  "ASSISTANT_CAMPUS_CHIEF",
-]);
+const VERIFY_ROLES = new Set(["SUPER_ADMIN", "ADMIN", "FINANCE"]);
+const APPROVE_ROLES = new Set(["SUPER_ADMIN", "CAMPUS_CHIEF"]);
 
 function roleOf(req) {
   return String(req.user?.role || "").trim().toUpperCase();
@@ -86,6 +80,8 @@ async function writeAudit(req, action, entity, entityId, meta) {
 async function ensureOtSchema() {
   if (otSchemaReady) return otSchemaReady;
   otSchemaReady = (async () => {
+    await db.query(`INSERT IGNORE INTO roles (name) VALUES ('FINANCE')`);
+
     await db.query(`
       CREATE TABLE IF NOT EXISTS ot_staff_profiles (
         id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -309,9 +305,7 @@ function canCreateClaim(role) {
 }
 
 function canViewAll(role) {
-  return ["SUPER_ADMIN", "ADMIN", "EXAM_HEAD", "CAMPUS_CHIEF", "ASSISTANT_CAMPUS_CHIEF"].includes(
-    role
-  );
+  return ["SUPER_ADMIN", "ADMIN", "FINANCE", "CAMPUS_CHIEF"].includes(role);
 }
 
 function canVerify(role) {
@@ -362,17 +356,19 @@ async function fetchClaimById(claimId) {
 function buildClaimPermissions(role, uid, claim) {
   const isOwner = Number(claim.staff_user_id) === Number(uid);
   const editable = ["DRAFT", "REJECTED"].includes(String(claim.status || ""));
+  const status = String(claim.status || "");
+  const verifyRole = canVerify(role);
+  const approveRole = canApprove(role);
+  const superAdmin = role === "SUPER_ADMIN";
   return {
     can_edit: editable && (isOwner || canViewAll(role)),
     can_submit: editable && isOwner,
-    can_verify: String(claim.status) === "SUBMITTED" && canVerify(role),
-    can_approve: String(claim.status) === "VERIFIED" && canApprove(role),
+    can_verify: status === "SUBMITTED" && (verifyRole || superAdmin),
+    can_approve: status === "VERIFIED" && (approveRole || superAdmin),
     can_reject:
-      ["SUBMITTED", "VERIFIED"].includes(String(claim.status)) &&
-      (canVerify(role) || canApprove(role)),
-    can_reopen:
-      ["REJECTED", "APPROVED"].includes(String(claim.status)) &&
-      ["SUPER_ADMIN", "ADMIN", "CAMPUS_CHIEF", "ASSISTANT_CAMPUS_CHIEF"].includes(role),
+      (status === "SUBMITTED" && (verifyRole || superAdmin)) ||
+      (status === "VERIFIED" && (approveRole || superAdmin)),
+    can_reopen: ["REJECTED", "APPROVED"].includes(status) && superAdmin,
   };
 }
 

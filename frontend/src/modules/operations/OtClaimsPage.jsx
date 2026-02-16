@@ -4,9 +4,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   BadgeCheck,
+  CalendarDays,
   BriefcaseBusiness,
   Clock3,
   FilePlus2,
+  Printer,
   ShieldCheck,
   WalletCards,
   XCircle,
@@ -14,10 +16,23 @@ import {
 
 import { api } from "../../lib/api";
 import { useMe } from "../../lib/useMe";
+import { getAppSettings } from "../../lib/appSettings";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Card, CardContent } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "../../components/ui/dialog";
+import NepaliCalendar from "../../components/calendar/NepaliCalendar";
+import { adToBs, formatBsDateLong } from "../../components/calendar/nepaliCalendarEngine";
+import NepaliMonthPicker, {
+  currentBsMonthKey,
+  formatNepaliMonthKey,
+} from "../../components/calendar/NepaliMonthPicker";
 
 function norm(v) {
   return String(v ?? "").trim();
@@ -27,11 +42,45 @@ function readErr(err, fallback) {
   return err?.response?.data?.message || err?.message || fallback;
 }
 
+function toIsoDate(dateValue) {
+  if (!dateValue) return "";
+  const d = dateValue instanceof Date ? new Date(dateValue) : new Date(dateValue);
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function statusBadgeVariant(status) {
   if (status === "APPROVED" || status === "PAID") return "secondary";
   if (status === "REJECTED") return "destructive";
   if (status === "VERIFIED") return "default";
   return "outline";
+}
+
+function escapeHtml(raw) {
+  return String(raw ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function formatOtDateForPrint(isoDate) {
+  const d = new Date(`${String(isoDate || "").slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return String(isoDate || "—");
+  return d.toLocaleDateString("en-CA");
+}
+
+function formatOtTimeForPrint(rawTime) {
+  const t = String(rawTime || "").slice(0, 5);
+  if (!/^\d{2}:\d{2}$/.test(t)) return String(rawTime || "—");
+  const [h, m] = t.split(":").map(Number);
+  const suffix = h >= 12 ? "PM" : "AM";
+  const hh = ((h + 11) % 12) + 1;
+  return `${String(hh).padStart(2, "0")}:${String(m).padStart(2, "0")} ${suffix}`;
 }
 
 const SCOPE_OPTIONS = [
@@ -49,10 +98,9 @@ export default function OtClaimsPage() {
   const canAccessOt = [
     "SUPER_ADMIN",
     "ADMIN",
+    "FINANCE",
     "TEACHER",
-    "EXAM_HEAD",
     "CAMPUS_CHIEF",
-    "ASSISTANT_CAMPUS_CHIEF",
   ].includes(role);
   const canManagePolicy = ["SUPER_ADMIN", "ADMIN"].includes(role);
 
@@ -60,7 +108,7 @@ export default function OtClaimsPage() {
   const [scope, setScope] = useState(norm(searchParams.get("scope")) || "my");
   const [status, setStatus] = useState(norm(searchParams.get("status")));
   const [month, setMonth] = useState(
-    norm(searchParams.get("month")) || new Date().toISOString().slice(0, 7)
+    norm(searchParams.get("month")) || currentBsMonthKey()
   );
   const [selectedClaimId, setSelectedClaimId] = useState(
     Number(searchParams.get("claim_id") || 0)
@@ -78,6 +126,7 @@ export default function OtClaimsPage() {
     is_holiday: false,
     reason: "",
   });
+  const [isBsCalendarOpen, setIsBsCalendarOpen] = useState(false);
 
   const dashboardQ = useQuery({
     queryKey: ["ot", "dashboard"],
@@ -251,19 +300,11 @@ export default function OtClaimsPage() {
 
   const allowedScopes = useMemo(() => {
     return SCOPE_OPTIONS.filter((s) => {
-      if (s.value === "pending_verify") return ["SUPER_ADMIN", "ADMIN", "EXAM_HEAD"].includes(role);
-      if (s.value === "pending_approve")
-        return ["SUPER_ADMIN", "ADMIN", "CAMPUS_CHIEF", "ASSISTANT_CAMPUS_CHIEF"].includes(
-          role
-        );
+      if (s.value === "pending_verify")
+        return ["SUPER_ADMIN", "ADMIN", "FINANCE"].includes(role);
+      if (s.value === "pending_approve") return ["SUPER_ADMIN", "CAMPUS_CHIEF"].includes(role);
       if (s.value === "all")
-        return [
-          "SUPER_ADMIN",
-          "ADMIN",
-          "EXAM_HEAD",
-          "CAMPUS_CHIEF",
-          "ASSISTANT_CAMPUS_CHIEF",
-        ].includes(role);
+        return ["SUPER_ADMIN", "ADMIN", "FINANCE", "CAMPUS_CHIEF"].includes(role);
       return true;
     });
   }, [role]);
@@ -279,6 +320,222 @@ export default function OtClaimsPage() {
   const items = Array.isArray(claimData?.items) ? claimData.items : [];
   const approvals = Array.isArray(claimData?.approvals) ? claimData.approvals : [];
   const perms = claimData?.permissions || {};
+
+  const itemWorkDateBsValue = useMemo(() => {
+    const iso = norm(itemForm.work_date);
+    if (!iso) return adToBs(new Date());
+    const adDate = new Date(`${iso}T00:00:00`);
+    if (Number.isNaN(adDate.getTime())) return adToBs(new Date());
+    return adToBs(adDate);
+  }, [itemForm.work_date]);
+
+  const itemWorkDateBsLabel = useMemo(() => {
+    const iso = norm(itemForm.work_date);
+    if (!iso) return "BS date not selected";
+    const adDate = new Date(`${iso}T00:00:00`);
+    if (Number.isNaN(adDate.getTime())) return "BS date not selected";
+    return formatBsDateLong(adToBs(adDate));
+  }, [itemForm.work_date]);
+
+  const canPrintClaim = !!claim && String(claim.status || "").toUpperCase() === "APPROVED";
+
+  const printApprovedClaim = () => {
+    if (!canPrintClaim || !claim) {
+      toast.error("Only approved OT claims can be printed");
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "width=1024,height=768");
+    if (!printWindow) {
+      toast.error("Popup blocked. Please allow popups to print OT form.");
+      return;
+    }
+
+    const rowsHtml =
+      items.length === 0
+        ? `<tr><td colspan="7" class="empty">No OT entries.</td></tr>`
+        : items
+            .map((i, idx) => {
+              const workIso = String(i.work_date || "").slice(0, 10);
+              const bsLabel = (() => {
+                const adDate = new Date(`${workIso}T00:00:00`);
+                if (Number.isNaN(adDate.getTime())) return "";
+                return formatBsDateLong(adToBs(adDate));
+              })();
+              return `
+                <tr>
+                  <td>${idx + 1}</td>
+                  <td>${escapeHtml(formatOtDateForPrint(workIso))}<div class="sub">${escapeHtml(
+                bsLabel
+              )}</div></td>
+                  <td>${escapeHtml(formatOtTimeForPrint(i.start_time))} - ${escapeHtml(
+                formatOtTimeForPrint(i.end_time)
+              )}</td>
+                  <td class="right">${escapeHtml(i.break_minutes ?? 0)}</td>
+                  <td class="right">${escapeHtml(Number(i.ot_hours || 0).toFixed(2))}</td>
+                  <td class="right">${escapeHtml(Number(i.amount || 0).toFixed(2))}</td>
+                  <td>${escapeHtml(i.reason || "")}</td>
+                </tr>
+              `;
+            })
+            .join("");
+
+    const trailHtml =
+      approvals.length === 0
+        ? `<tr><td colspan="4" class="empty">No workflow actions.</td></tr>`
+        : approvals
+            .map((a) => {
+              const ts = a.action_at ? new Date(a.action_at).toLocaleString() : "—";
+              return `
+                <tr>
+                  <td>${escapeHtml(a.action || "—")}</td>
+                  <td>${escapeHtml(a.action_by_name || "System")}</td>
+                  <td>${escapeHtml(ts)}</td>
+                  <td>${escapeHtml(a.note || "—")}</td>
+                </tr>
+              `;
+            })
+            .join("");
+
+    const monthLabel = formatNepaliMonthKey(claim.claim_month);
+    const appSettings = getAppSettings();
+    const logoSrc =
+      String(appSettings.logo_data_url || "").trim() ||
+      String(appSettings.logo_small_data_url || "").trim() ||
+      "";
+    const logoHtml = logoSrc
+      ? `<img src="${escapeHtml(logoSrc)}" alt="Campus logo" class="campus-logo" />`
+      : `<div class="campus-logo-placeholder"></div>`;
+    const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>OT Form ${escapeHtml(claim.claim_no || `#${claim.id}`)}</title>
+    <style>
+      @page { size: A4; margin: 14mm; }
+      body {
+        font-family: Arial, "Noto Sans Devanagari", sans-serif;
+        color: #0f172a;
+        font-size: 12px;
+        padding-bottom: 34mm;
+      }
+      .header { border-bottom: 2px solid #1e3a8a; padding-bottom: 10px; margin-bottom: 10px; }
+      .header-top {
+        display: grid;
+        grid-template-columns: 82px 1fr 82px;
+        align-items: center;
+        column-gap: 8px;
+      }
+      .header-center { text-align: center; }
+      .campus-name { font-size: 20px; font-weight: 800; color: #1e3a8a; margin: 0; line-height: 1.2; }
+      .campus-address { font-size: 13px; font-weight: 600; color: #334155; margin: 2px 0 0 0; }
+      .title { font-size: 15px; font-weight: 700; color: #1e293b; margin: 6px 0 0 0; }
+      .campus-logo {
+        height: 68px;
+        width: 68px;
+        object-fit: contain;
+        border-radius: 10px;
+      }
+      .campus-logo-placeholder {
+        height: 68px;
+        width: 68px;
+        border-radius: 10px;
+        border: 1px dashed #94a3b8;
+      }
+      .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; margin: 10px 0; }
+      .chip { display: inline-block; padding: 2px 8px; border: 1px solid #cbd5e1; border-radius: 999px; font-size: 11px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+      th, td { border: 1px solid #cbd5e1; padding: 6px; vertical-align: top; }
+      th { background: #f1f5f9; text-align: left; }
+      .right { text-align: right; }
+      .sub { font-size: 10px; color: #475569; margin-top: 2px; }
+      .section-title { margin-top: 12px; font-size: 13px; font-weight: 700; color: #1e293b; }
+      .totals { margin-top: 8px; display: flex; gap: 18px; justify-content: flex-end; font-weight: 700; }
+      .footer-sign {
+        position: fixed;
+        left: 14mm;
+        right: 14mm;
+        bottom: 10mm;
+      }
+      .sign { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+      .sign-box { border-top: 1px solid #334155; padding-top: 4px; text-align: center; color: #334155; font-size: 11px; }
+      .empty { text-align: center; color: #64748b; padding: 10px; }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <div class="header-top">
+        <div>${logoHtml}</div>
+        <div class="header-center">
+          <p class="campus-name">Gaurishankar Multiple Campus</p>
+          <p class="campus-address">Charikot, Dolakha</p>
+          <p class="title">Overtime Claim Form</p>
+        </div>
+        <div></div>
+      </div>
+      <div class="meta">
+        <div><strong>Claim No:</strong> ${escapeHtml(claim.claim_no || `OT-${claim.id}`)}</div>
+        <div><strong>Status:</strong> <span class="chip">${escapeHtml(claim.status)}</span></div>
+        <div><strong>Name:</strong> ${escapeHtml(claim.staff_name || "—")}</div>
+        <div><strong>Claim Month (BS):</strong> ${escapeHtml(monthLabel)}</div>
+        <div><strong>Email:</strong> ${escapeHtml(claim.staff_email || "—")}</div>
+        <div><strong>Generated At:</strong> ${escapeHtml(new Date().toLocaleString())}</div>
+      </div>
+      <div><strong>Note:</strong> ${escapeHtml(claim.note || "—")}</div>
+    </div>
+
+    <div class="section-title">OT Entries</div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:32px;">SN</th>
+          <th style="width:170px;">Work Date</th>
+          <th style="width:155px;">Time</th>
+          <th style="width:65px;" class="right">Break</th>
+          <th style="width:70px;" class="right">Hours</th>
+          <th style="width:80px;" class="right">Amount</th>
+          <th>Reason</th>
+        </tr>
+      </thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+
+    <div class="totals">
+      <div>Total Hours: ${escapeHtml(Number(claim.total_hours || 0).toFixed(2))}</div>
+      <div>Total Amount: NPR ${escapeHtml(Number(claim.total_amount || 0).toFixed(2))}</div>
+    </div>
+
+    <div class="section-title">Approval Trail</div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:120px;">Action</th>
+          <th style="width:180px;">By</th>
+          <th style="width:170px;">At</th>
+          <th>Note</th>
+        </tr>
+      </thead>
+      <tbody>${trailHtml}</tbody>
+    </table>
+
+    <footer class="footer-sign">
+      <div class="sign">
+        <div class="sign-box">Staff Signature</div>
+        <div class="sign-box">Verified By (Finance/Admin)</div>
+        <div class="sign-box">Approved By (Campus Chief)</div>
+      </div>
+    </footer>
+  </body>
+</html>`;
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+    }, 250);
+  };
 
   if (meQ.isLoading) {
     return <div className="text-sm text-muted-foreground">Loading OT module...</div>;
@@ -356,8 +613,8 @@ export default function OtClaimsPage() {
             ))}
           </div>
 
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-[220px_220px_auto]">
-            <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-[280px_220px_auto]">
+            <NepaliMonthPicker value={month} onChange={setMonth} />
             <select
               className="h-10 rounded-md border bg-background px-3 text-sm"
               value={status}
@@ -428,7 +685,7 @@ export default function OtClaimsPage() {
                             {r.claim_no || `Claim #${r.id}`}
                           </div>
                           <div className="text-xs text-muted-foreground truncate">
-                            {r.staff_name} • {r.claim_month}
+                            {r.staff_name} • {formatNepaliMonthKey(r.claim_month)}
                           </div>
                         </div>
                         <Badge variant={statusBadgeVariant(r.status)}>{r.status}</Badge>
@@ -467,7 +724,8 @@ export default function OtClaimsPage() {
                   <div>
                     <div className="text-lg font-semibold">{claim.claim_no || `Claim #${claim.id}`}</div>
                     <div className="text-xs text-muted-foreground">
-                      {claim.staff_name} • {claim.staff_email || "no-email"} • {claim.claim_month}
+                      {claim.staff_name} • {claim.staff_email || "no-email"} •{" "}
+                      {formatNepaliMonthKey(claim.claim_month)}
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -480,15 +738,26 @@ export default function OtClaimsPage() {
                       <WalletCards className="h-3.5 w-3.5" />
                       NPR {Number(claim.total_amount || 0).toFixed(2)}
                     </Badge>
+                    {canPrintClaim ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="inline-flex items-center gap-1.5"
+                        onClick={printApprovedClaim}
+                      >
+                        <Printer className="h-4 w-4" />
+                        Print
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-[220px_1fr_auto]">
-                  <Input
-                    type="month"
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-[280px_1fr_auto]">
+                  <NepaliMonthPicker
                     value={claimMonthForm}
-                    onChange={(e) => setClaimMonthForm(e.target.value)}
-                    disabled={!perms.can_edit}
+                    onChange={setClaimMonthForm}
+                    className={!perms.can_edit ? "pointer-events-none opacity-60" : ""}
                   />
                   <Input
                     value={claimNoteForm}
@@ -513,11 +782,15 @@ export default function OtClaimsPage() {
                       Add OT Entry
                     </div>
                     <div className="grid grid-cols-1 gap-2 md:grid-cols-6">
-                      <Input
-                        type="date"
-                        value={itemForm.work_date}
-                        onChange={(e) => setItemForm((p) => ({ ...p, work_date: e.target.value }))}
-                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-10 w-full justify-start gap-1.5 overflow-hidden"
+                        onClick={() => setIsBsCalendarOpen(true)}
+                      >
+                        <CalendarDays className="h-4 w-4 shrink-0" />
+                        <span className="truncate text-left">{itemWorkDateBsLabel}</span>
+                      </Button>
                       <Input
                         type="time"
                         value={itemForm.start_time}
@@ -562,6 +835,29 @@ export default function OtClaimsPage() {
                     </label>
                   </div>
                 ) : null}
+
+                <Dialog open={isBsCalendarOpen} onOpenChange={setIsBsCalendarOpen}>
+                  <DialogContent className="max-w-sm p-4">
+                    <DialogHeader>
+                      <DialogTitle className="text-base">Select Work Date (BS)</DialogTitle>
+                    </DialogHeader>
+                    <NepaliCalendar
+                      value={itemWorkDateBsValue}
+                      onChange={({ adDate }) => {
+                        const iso = toIsoDate(adDate);
+                        if (iso) {
+                          setItemForm((p) => ({ ...p, work_date: iso }));
+                          setIsBsCalendarOpen(false);
+                        }
+                      }}
+                    />
+                    <div className="flex justify-end">
+                      <Button type="button" onClick={() => setIsBsCalendarOpen(false)}>
+                        Done
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
 
                 <div className="overflow-auto rounded-md border">
                   <table className="w-full text-sm">

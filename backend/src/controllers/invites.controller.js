@@ -30,6 +30,7 @@ async function createInvite(req, res) {
 
     const allowedRoles = [
       "ADMIN",
+      "FINANCE",
       "TEACHER",
       "STUDENT",
       "EXAM_HEAD",

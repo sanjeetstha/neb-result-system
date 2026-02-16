@@ -145,6 +145,7 @@ export default function InvitesPage() {
                   onChange={(e) => setRole(e.target.value)}
                 >
                   <option value="ADMIN">ADMIN</option>
+                  <option value="FINANCE">FINANCE</option>
                   <option value="TEACHER">TEACHER</option>
                   <option value="EXAM_HEAD">EXAM_HEAD (Exam Head)</option>
                   <option value="CAMPUS_CHIEF">CAMPUS_CHIEF (Campus Chief)</option>

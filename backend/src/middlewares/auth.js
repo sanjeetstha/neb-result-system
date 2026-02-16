@@ -3,6 +3,7 @@ const { verifyJwt } = require("../utils/jwt");
 const INTERNAL_ROLES = new Set([
   "SUPER_ADMIN",
   "ADMIN",
+  "FINANCE",
   "TEACHER",
   "STUDENT",
   "EXAM_HEAD",

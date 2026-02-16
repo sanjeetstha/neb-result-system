@@ -215,7 +215,7 @@ async function listMyNotifications(req, res) {
 
     // OT Claim workflow notifications
     try {
-      if (role === "EXAM_HEAD" || role === "ADMIN" || role === "SUPER_ADMIN") {
+      if (role === "FINANCE" || role === "ADMIN" || role === "SUPER_ADMIN") {
         const params = [];
         let campusWhere = "";
         if (campusId) {
@@ -253,8 +253,6 @@ async function listMyNotifications(req, res) {
     try {
       if (
         role === "CAMPUS_CHIEF" ||
-        role === "ASSISTANT_CAMPUS_CHIEF" ||
-        role === "ADMIN" ||
         role === "SUPER_ADMIN"
       ) {
         const params = [];
@@ -292,7 +290,13 @@ async function listMyNotifications(req, res) {
     }
 
     try {
-      if (role === "TEACHER") {
+      if (
+        role === "TEACHER" ||
+        role === "FINANCE" ||
+        role === "ADMIN" ||
+        role === "SUPER_ADMIN" ||
+        role === "CAMPUS_CHIEF"
+      ) {
         const [rows] = await db.query(
           `SELECT c.id, c.claim_no, c.claim_month, c.status, c.updated_at
            FROM ot_claims c

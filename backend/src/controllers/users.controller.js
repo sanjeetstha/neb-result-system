@@ -200,6 +200,7 @@ async function updateUser(req, res) {
     const allowed = [
       "SUPER_ADMIN",
       "ADMIN",
+      "FINANCE",
       "TEACHER",
       "STUDENT",
       "EXAM_HEAD",
@@ -209,6 +210,7 @@ async function updateUser(req, res) {
     if (!allowed.includes(role)) {
       return res.status(400).json({ ok: false, message: "Invalid role" });
     }
+    await db.query(`INSERT IGNORE INTO roles (name) VALUES (?)`, [role]);
     const [[roleRow]] = await db.query(`SELECT id FROM roles WHERE name=? LIMIT 1`, [role]);
     if (!roleRow) return res.status(400).json({ ok: false, message: "Role not found" });
     roleId = roleRow.id;

@@ -5,10 +5,9 @@ const ot = require("../controllers/ot.controller");
 const INTERNAL_ROLES = [
   "SUPER_ADMIN",
   "ADMIN",
+  "FINANCE",
   "TEACHER",
-  "EXAM_HEAD",
   "CAMPUS_CHIEF",
-  "ASSISTANT_CAMPUS_CHIEF",
 ];
 
 router.get("/dashboard", requireAuth, requireRole(...INTERNAL_ROLES), ot.dashboard);

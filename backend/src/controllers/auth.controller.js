@@ -79,6 +79,7 @@ async function createUser(req, res) {
   // only allow these roles to be created via this endpoint
   const allowed = [
     "ADMIN",
+    "FINANCE",
     "TEACHER",
     "STUDENT",
     "EXAM_HEAD",
@@ -89,6 +90,7 @@ async function createUser(req, res) {
     return res.status(400).json({ ok: false, message: "Role not allowed here" });
   }
 
+  await db.query(`INSERT IGNORE INTO roles (name) VALUES (?)`, [role]);
   const [[roleRow]] = await db.query(`SELECT id FROM roles WHERE name=? LIMIT 1`, [role]);
   if (!roleRow) return res.status(400).json({ ok: false, message: "Invalid role" });
 
@@ -223,6 +225,7 @@ async function acceptInvite(req, res) {
     }
 
     // ✅ find role_id from roles table (inv.role is like "TEACHER")
+    await db.query(`INSERT IGNORE INTO roles (name) VALUES (?)`, [inv.role]);
     const [[roleRow]] = await db.query(`SELECT id FROM roles WHERE name=? LIMIT 1`, [inv.role]);
     if (!roleRow) return res.status(400).json({ ok: false, message: "Invalid role in invite" });
 

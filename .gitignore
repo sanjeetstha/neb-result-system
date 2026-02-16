@@ -29,8 +29,11 @@ build/
 
 # DB dumps / excel imports (avoid leaking data)
 *.sql
+*.sql.gz
+*.sha256
 *.sqlite
 *.db
 *.xlsx
 *.xls
 data/
+backups/
