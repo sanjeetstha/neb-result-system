@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import { api } from "../../lib/api";
 import { useMe } from "../../lib/useMe";
+import { todayLocalIsoDate } from "../../lib/date";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
@@ -34,7 +35,7 @@ export default function OtPolicyPage() {
     holiday_multiplier: "2",
     rounding_minutes: "15",
     daily_cap_hours: "8",
-    effective_from: new Date().toISOString().slice(0, 10),
+    effective_from: todayLocalIsoDate(),
   });
 
   useEffect(() => {
@@ -47,10 +48,7 @@ export default function OtPolicyPage() {
       holiday_multiplier: String(p.holiday_multiplier ?? "2"),
       rounding_minutes: String(p.rounding_minutes ?? "15"),
       daily_cap_hours: String(p.daily_cap_hours ?? "8"),
-      effective_from: String(p.effective_from || new Date().toISOString().slice(0, 10)).slice(
-        0,
-        10
-      ),
+      effective_from: String(p.effective_from || todayLocalIsoDate()).slice(0, 10),
     });
   }, [policyQ.data]);
 

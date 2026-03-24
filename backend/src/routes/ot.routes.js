@@ -11,6 +11,12 @@ const INTERNAL_ROLES = [
 ];
 
 router.get("/dashboard", requireAuth, requireRole(...INTERNAL_ROLES), ot.dashboard);
+router.get(
+  "/reports",
+  requireAuth,
+  requireRole("SUPER_ADMIN", "ADMIN", "FINANCE", "CAMPUS_CHIEF"),
+  ot.otReports
+);
 router.get("/claims", requireAuth, requireRole(...INTERNAL_ROLES), ot.listClaims);
 router.post("/claims", requireAuth, requireRole(...INTERNAL_ROLES), ot.createClaim);
 router.get("/claims/:id", requireAuth, requireRole(...INTERNAL_ROLES), ot.getClaim);

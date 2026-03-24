@@ -34,11 +34,24 @@ function parseMonth(value) {
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(s) ? s : null;
 }
 
+function parseIsoDate(value) {
+  const s = norm(value);
+  return /^\d{4}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/.test(s) ? s : null;
+}
+
 function currentMonthKey() {
   const d = new Date();
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   return `${y}-${m}`;
+}
+
+function currentIsoDateLocal() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function parseHmToMinutes(hm) {
@@ -211,7 +224,7 @@ async function getOrCreateStaffProfile(uid) {
 }
 
 async function getActivePolicy(campusId, forDate = null) {
-  const date = norm(forDate) || new Date().toISOString().slice(0, 10);
+  const date = norm(forDate) || currentIsoDateLocal();
   const [rows] = await db.query(
     `SELECT *
      FROM ot_policies
@@ -318,6 +331,21 @@ function canApprove(role) {
 
 function canManagePolicy(role) {
   return ["SUPER_ADMIN", "ADMIN"].includes(role);
+}
+
+function canViewReports(role) {
+  return ["SUPER_ADMIN", "ADMIN", "FINANCE", "CAMPUS_CHIEF"].includes(role);
+}
+
+function buildStatusDateSql(alias = "c") {
+  return `CASE
+    WHEN ${alias}.status='SUBMITTED' THEN COALESCE(${alias}.submitted_at, ${alias}.updated_at, ${alias}.created_at)
+    WHEN ${alias}.status='VERIFIED' THEN COALESCE(${alias}.verified_at, ${alias}.updated_at, ${alias}.created_at)
+    WHEN ${alias}.status='APPROVED' THEN COALESCE(${alias}.approved_at, ${alias}.updated_at, ${alias}.created_at)
+    WHEN ${alias}.status='REJECTED' THEN COALESCE(${alias}.rejected_at, ${alias}.updated_at, ${alias}.created_at)
+    WHEN ${alias}.status='PAID' THEN COALESCE(${alias}.approved_at, ${alias}.updated_at, ${alias}.created_at)
+    ELSE COALESCE(${alias}.updated_at, ${alias}.created_at)
+  END`;
 }
 
 async function fetchClaimById(claimId) {
@@ -812,6 +840,227 @@ async function reopenClaim(req, res) {
   }
 }
 
+async function otReports(req, res) {
+  try {
+    await ensureOtSchema();
+    const uid = Number(req.user?.uid || 0);
+    const role = roleOf(req);
+    if (!uid || !canViewReports(role)) {
+      return res.status(403).json({ ok: false, message: "Forbidden" });
+    }
+
+    const me = await loadMe(uid);
+    if (!me) return res.status(401).json({ ok: false, message: "User not found" });
+
+    const allowedStatuses = new Set([
+      "DRAFT",
+      "SUBMITTED",
+      "VERIFIED",
+      "APPROVED",
+      "REJECTED",
+      "PAID",
+    ]);
+
+    const status = norm(req.query?.status).toUpperCase();
+    const staffUserId = Number(req.query?.staff_user_id || 0);
+    const dateFrom = parseIsoDate(req.query?.date_from);
+    const dateTo = parseIsoDate(req.query?.date_to);
+    const q = norm(req.query?.q);
+    const limit = Math.max(1, Math.min(1000, toNum(req.query?.limit, 300)));
+
+    const statusDateSql = buildStatusDateSql("c");
+    const where = [];
+    const params = [];
+
+    if (me.campus_id) {
+      where.push(`(c.campus_id=? OR c.campus_id IS NULL)`);
+      params.push(me.campus_id);
+    }
+    if (status && status !== "ALL" && allowedStatuses.has(status)) {
+      where.push(`c.status=?`);
+      params.push(status);
+    }
+    if (staffUserId > 0) {
+      where.push(`c.staff_user_id=?`);
+      params.push(staffUserId);
+    }
+    if (dateFrom) {
+      where.push(`DATE(${statusDateSql}) >= DATE(?)`);
+      params.push(dateFrom);
+    }
+    if (dateTo) {
+      where.push(`DATE(${statusDateSql}) <= DATE(?)`);
+      params.push(dateTo);
+    }
+    if (q) {
+      where.push(`(
+        c.claim_no LIKE ? OR
+        u.full_name LIKE ? OR
+        u.email LIKE ? OR
+        COALESCE(u.phone, '') LIKE ?
+      )`);
+      const like = `%${q}%`;
+      params.push(like, like, like, like);
+    }
+
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+    const [claims] = await db.query(
+      `SELECT
+         c.id,
+         c.claim_no,
+         c.claim_month,
+         c.status,
+         c.note,
+         c.total_hours,
+         c.total_amount,
+         c.created_at,
+         c.updated_at,
+         c.submitted_at,
+         c.verified_at,
+         c.approved_at,
+         c.rejected_at,
+         ${statusDateSql} AS status_at,
+         u.id AS staff_user_id,
+         u.full_name AS staff_name,
+         u.email AS staff_email,
+         u.phone AS staff_phone,
+         (SELECT COUNT(*) FROM ot_claim_items i WHERE i.claim_id=c.id) AS item_count
+       FROM ot_claims c
+       JOIN users u ON u.id=c.staff_user_id
+       ${whereSql}
+       ORDER BY status_at DESC, c.id DESC
+       LIMIT ?`,
+      [...params, limit]
+    );
+
+    const [summaryRows] = await db.query(
+      `SELECT
+         c.status,
+         COUNT(*) AS claim_count,
+         COALESCE(SUM(c.total_hours), 0) AS total_hours,
+         COALESCE(SUM(c.total_amount), 0) AS total_amount
+       FROM ot_claims c
+       JOIN users u ON u.id=c.staff_user_id
+       ${whereSql}
+       GROUP BY c.status
+       ORDER BY FIELD(c.status, 'DRAFT', 'SUBMITTED', 'VERIFIED', 'APPROVED', 'REJECTED', 'PAID')`,
+      params
+    );
+
+    const [dateRows] = await db.query(
+      `SELECT
+         DATE(${statusDateSql}) AS report_date,
+         COUNT(*) AS claim_count,
+         COUNT(DISTINCT c.staff_user_id) AS staff_count,
+         COALESCE(SUM(c.total_hours), 0) AS total_hours,
+         COALESCE(SUM(c.total_amount), 0) AS total_amount,
+         SUM(CASE WHEN c.status='DRAFT' THEN 1 ELSE 0 END) AS draft_count,
+         SUM(CASE WHEN c.status='SUBMITTED' THEN 1 ELSE 0 END) AS submitted_count,
+         SUM(CASE WHEN c.status='VERIFIED' THEN 1 ELSE 0 END) AS verified_count,
+         SUM(CASE WHEN c.status='APPROVED' THEN 1 ELSE 0 END) AS approved_count,
+         SUM(CASE WHEN c.status='REJECTED' THEN 1 ELSE 0 END) AS rejected_count
+       FROM ot_claims c
+       JOIN users u ON u.id=c.staff_user_id
+       ${whereSql}
+       GROUP BY DATE(${statusDateSql})
+       ORDER BY report_date DESC
+       LIMIT 180`,
+      params
+    );
+
+    const [userRows] = await db.query(
+      `SELECT
+         u.id AS staff_user_id,
+         u.full_name AS staff_name,
+         u.email AS staff_email,
+         u.phone AS staff_phone,
+         COUNT(*) AS claim_count,
+         COALESCE(SUM(c.total_hours), 0) AS total_hours,
+         COALESCE(SUM(c.total_amount), 0) AS total_amount,
+         SUM(CASE WHEN c.status='DRAFT' THEN 1 ELSE 0 END) AS draft_count,
+         SUM(CASE WHEN c.status='SUBMITTED' THEN 1 ELSE 0 END) AS submitted_count,
+         SUM(CASE WHEN c.status='VERIFIED' THEN 1 ELSE 0 END) AS verified_count,
+         SUM(CASE WHEN c.status='APPROVED' THEN 1 ELSE 0 END) AS approved_count,
+         SUM(CASE WHEN c.status='REJECTED' THEN 1 ELSE 0 END) AS rejected_count
+       FROM ot_claims c
+       JOIN users u ON u.id=c.staff_user_id
+       ${whereSql}
+       GROUP BY u.id, u.full_name, u.email, u.phone
+       ORDER BY total_amount DESC, claim_count DESC, u.full_name ASC
+       LIMIT 200`,
+      params
+    );
+
+    const staffWhere = [];
+    const staffParams = [];
+    if (me.campus_id) {
+      staffWhere.push(`(c.campus_id=? OR c.campus_id IS NULL)`);
+      staffParams.push(me.campus_id);
+    }
+    const staffWhereSql = staffWhere.length ? `WHERE ${staffWhere.join(" AND ")}` : "";
+    const [staffOptions] = await db.query(
+      `SELECT DISTINCT
+         u.id AS value,
+         u.full_name AS label,
+         u.email,
+         u.phone
+       FROM ot_claims c
+       JOIN users u ON u.id=c.staff_user_id
+       ${staffWhereSql}
+       ORDER BY u.full_name ASC
+       LIMIT 500`,
+      staffParams
+    );
+
+    const summary = {
+      claim_count: 0,
+      total_hours: 0,
+      total_amount: 0,
+      staff_count: userRows.length,
+      approved_count: 0,
+      rejected_count: 0,
+      drafted_count: 0,
+      submitted_count: 0,
+      verified_count: 0,
+    };
+    for (const row of summaryRows) {
+      summary.claim_count += Number(row.claim_count || 0);
+      summary.total_hours += Number(row.total_hours || 0);
+      summary.total_amount += Number(row.total_amount || 0);
+      const statusKey = String(row.status || "").toUpperCase();
+      if (statusKey === "APPROVED") summary.approved_count += Number(row.claim_count || 0);
+      if (statusKey === "REJECTED") summary.rejected_count += Number(row.claim_count || 0);
+      if (statusKey === "DRAFT") summary.drafted_count += Number(row.claim_count || 0);
+      if (statusKey === "SUBMITTED") summary.submitted_count += Number(row.claim_count || 0);
+      if (statusKey === "VERIFIED") summary.verified_count += Number(row.claim_count || 0);
+    }
+    summary.total_hours = round2(summary.total_hours);
+    summary.total_amount = round2(summary.total_amount);
+
+    return res.json({
+      ok: true,
+      filters: {
+        status: status && allowedStatuses.has(status) ? status : status === "ALL" ? "ALL" : "",
+        staff_user_id: staffUserId || null,
+        date_from: dateFrom || null,
+        date_to: dateTo || null,
+        q: q || "",
+        limit,
+      },
+      summary,
+      status_summary: summaryRows,
+      by_date: dateRows,
+      by_user: userRows,
+      claims,
+      staff_options: staffOptions,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, message: err.message || "Failed to load OT reports" });
+  }
+}
+
+
 async function getActivePolicyHandler(req, res) {
   try {
     await ensureOtSchema();
@@ -847,7 +1096,7 @@ async function upsertActivePolicy(req, res) {
     const holidayMultiplier = Math.max(1, toNum(req.body?.holiday_multiplier, 2));
     const roundingMinutes = Math.max(1, Math.floor(toNum(req.body?.rounding_minutes, 15)));
     const dailyCapHours = Math.max(0.5, toNum(req.body?.daily_cap_hours, 8));
-    const effectiveFrom = norm(req.body?.effective_from) || new Date().toISOString().slice(0, 10);
+    const effectiveFrom = norm(req.body?.effective_from) || currentIsoDateLocal();
 
     await db.query(
       `UPDATE ot_policies
@@ -902,6 +1151,7 @@ module.exports = {
   approveClaim,
   rejectClaim,
   reopenClaim,
+  otReports,
   getActivePolicy: getActivePolicyHandler,
   upsertActivePolicy,
 };

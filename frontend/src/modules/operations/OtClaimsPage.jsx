@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -12,11 +12,16 @@ import {
   ShieldCheck,
   WalletCards,
   XCircle,
+  Bell,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 import { api } from "../../lib/api";
 import { useMe } from "../../lib/useMe";
 import { getAppSettings } from "../../lib/appSettings";
+import { formatLocalDateToIso, parseIsoDateParts, todayLocalIsoDate } from "../../lib/date";
+import { getNotificationStageMeta, isOtNotification } from "../../lib/notifications";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Card, CardContent } from "../../components/ui/card";
@@ -38,18 +43,13 @@ function norm(v) {
   return String(v ?? "").trim();
 }
 
-function readErr(err, fallback) {
-  return err?.response?.data?.message || err?.message || fallback;
+function normalizeMonthKey(value) {
+  const s = norm(value);
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(s) ? s : "";
 }
 
-function toIsoDate(dateValue) {
-  if (!dateValue) return "";
-  const d = dateValue instanceof Date ? new Date(dateValue) : new Date(dateValue);
-  if (Number.isNaN(d.getTime())) return "";
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+function readErr(err, fallback) {
+  return err?.response?.data?.message || err?.message || fallback;
 }
 
 function statusBadgeVariant(status) {
@@ -69,9 +69,9 @@ function escapeHtml(raw) {
 }
 
 function formatOtDateForPrint(isoDate) {
-  const d = new Date(`${String(isoDate || "").slice(0, 10)}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return String(isoDate || "—");
-  return d.toLocaleDateString("en-CA");
+  const parsed = parseIsoDateParts(String(isoDate || "").slice(0, 10));
+  if (!parsed) return String(isoDate || "—");
+  return `${parsed.year}-${String(parsed.month).padStart(2, "0")}-${String(parsed.day).padStart(2, "0")}`;
 }
 
 function formatOtTimeForPrint(rawTime) {
@@ -83,6 +83,152 @@ function formatOtTimeForPrint(rawTime) {
   return `${String(hh).padStart(2, "0")}:${String(m).padStart(2, "0")} ${suffix}`;
 }
 
+function bsMonthKeyFromAdIso(isoDate) {
+  try {
+    if (!isoDate) return "";
+    const bs = adToBs(String(isoDate).slice(0, 10));
+    return `${bs.year}-${String(bs.month).padStart(2, "0")}`;
+  } catch {
+    return "";
+  }
+}
+
+function parseHmToMinutes(hm) {
+  const m = String(hm || "").trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+function addMinutesToHm(hm, deltaMinutes) {
+  const minutes = parseHmToMinutes(hm);
+  if (minutes == null) return "";
+  const next = Math.max(0, Math.min(23 * 60 + 59, minutes + Number(deltaMinutes || 0)));
+  const h = Math.floor(next / 60);
+  const m = next % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function round2(value) {
+  return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+}
+
+function timeAgo(input) {
+  if (!input) return "";
+  const stamp = new Date(input).getTime();
+  if (!Number.isFinite(stamp)) return "";
+  const diff = Math.max(0, Date.now() - stamp);
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function buildOtPreview(itemForm, policy) {
+  const workDate = String(itemForm?.work_date || "").slice(0, 10);
+  const startMinutes = parseHmToMinutes(itemForm?.start_time);
+  const endMinutes = parseHmToMinutes(itemForm?.end_time);
+  const claimMonth = bsMonthKeyFromAdIso(workDate);
+
+  if (!workDate) {
+    return {
+      valid: false,
+      message: "Select a work date first.",
+      claimMonth,
+      hours: 0,
+      amount: 0,
+      multiplier: 1,
+      rateTypeLabel: "Regular",
+    };
+  }
+
+  if (startMinutes == null || endMinutes == null) {
+    return {
+      valid: false,
+      message: "Enter a valid start and end time.",
+      claimMonth,
+      hours: 0,
+      amount: 0,
+      multiplier: 1,
+      rateTypeLabel: "Regular",
+    };
+  }
+
+  if (endMinutes <= startMinutes) {
+    return {
+      valid: false,
+      message: "End time must be later than start time.",
+      claimMonth,
+      hours: 0,
+      amount: 0,
+      multiplier: 1,
+      rateTypeLabel: "Regular",
+    };
+  }
+
+  const breakMinutes = Math.max(0, Math.floor(Number(itemForm?.break_minutes || 0)));
+  const rawMinutes = endMinutes - startMinutes - breakMinutes;
+  if (rawMinutes <= 0) {
+    return {
+      valid: false,
+      message: "Break time is larger than the selected OT time.",
+      claimMonth,
+      hours: 0,
+      amount: 0,
+      multiplier: 1,
+      rateTypeLabel: "Regular",
+    };
+  }
+
+  const rounding = Math.max(1, Math.floor(Number(policy?.rounding_minutes || 15)));
+  const roundedMinutes = Math.max(0, Math.round(rawMinutes / rounding) * rounding);
+  const capHours = Math.max(0.5, Number(policy?.daily_cap_hours || 8));
+  const cappedMinutes = Math.min(roundedMinutes, Math.floor(capHours * 60));
+  const parsedDate = parseIsoDateParts(workDate);
+  const adDate = parsedDate
+    ? new Date(parsedDate.year, parsedDate.month - 1, parsedDate.day, 12, 0, 0, 0)
+    : null;
+  const isHoliday = !!itemForm?.is_holiday;
+  const isSaturday = adDate ? adDate.getDay() === 6 : false;
+  const isWeekend = isHoliday ? false : isSaturday;
+  const multiplier = isHoliday
+    ? Math.max(1, Number(policy?.holiday_multiplier || 2))
+    : isWeekend
+    ? Math.max(1, Number(policy?.weekend_multiplier || 1.5))
+    : 1;
+  const hours = round2(cappedMinutes / 60);
+  const hourlyRate = Math.max(0, Number(policy?.hourly_rate || 0));
+  const amount = round2(hours * hourlyRate * multiplier);
+
+  return {
+    valid: true,
+    message: "",
+    claimMonth,
+    hours,
+    amount,
+    multiplier,
+    rateTypeLabel: isHoliday ? "Holiday" : isWeekend ? "Saturday" : "Regular",
+  };
+}
+
+const DURATION_PRESETS = [
+  { label: "+2h", minutes: 120 },
+  { label: "+3h", minutes: 180 },
+  { label: "+4h", minutes: 240 },
+];
+
+const NOTIFICATION_STAGE_ORDER = [
+  "PENDING_VERIFY",
+  "PENDING_APPROVE",
+  "SUBMITTED",
+  "DRAFT",
+  "APPROVED",
+  "REJECTED",
+  "INFO",
+];
+
 const SCOPE_OPTIONS = [
   { value: "my", label: "My Claims" },
   { value: "pending_verify", label: "Pending Verify" },
@@ -92,6 +238,7 @@ const SCOPE_OPTIONS = [
 
 export default function OtClaimsPage() {
   const qc = useQueryClient();
+  const nav = useNavigate();
   const meQ = useMe();
   const me = meQ.data || null;
   const role = String(me?.role || "").toUpperCase();
@@ -105,21 +252,22 @@ export default function OtClaimsPage() {
   const canManagePolicy = ["SUPER_ADMIN", "ADMIN"].includes(role);
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const [scope, setScope] = useState(norm(searchParams.get("scope")) || "my");
-  const [status, setStatus] = useState(norm(searchParams.get("status")));
-  const [month, setMonth] = useState(
-    norm(searchParams.get("month")) || currentBsMonthKey()
-  );
-  const [selectedClaimId, setSelectedClaimId] = useState(
-    Number(searchParams.get("claim_id") || 0)
-  );
+  const queryScope = norm(searchParams.get("scope")) || "my";
+  const queryStatus = norm(searchParams.get("status"));
+  const queryMonth = normalizeMonthKey(searchParams.get("month")) || currentBsMonthKey();
+  const queryClaimId = Number(searchParams.get("claim_id") || 0);
+
+  const [scope, setScope] = useState(queryScope);
+  const [status, setStatus] = useState(queryStatus);
+  const [month, setMonth] = useState(queryMonth);
+  const [selectedClaimId, setSelectedClaimId] = useState(queryClaimId);
 
   const [claimMonthForm, setClaimMonthForm] = useState("");
   const [claimNoteForm, setClaimNoteForm] = useState("");
   const [decisionNote, setDecisionNote] = useState("");
 
   const [itemForm, setItemForm] = useState({
-    work_date: new Date().toISOString().slice(0, 10),
+    work_date: todayLocalIsoDate(),
     start_time: "16:00",
     end_time: "18:00",
     break_minutes: "0",
@@ -127,6 +275,7 @@ export default function OtClaimsPage() {
     reason: "",
   });
   const [isBsCalendarOpen, setIsBsCalendarOpen] = useState(false);
+  const [isOtInboxExpanded, setIsOtInboxExpanded] = useState(false);
 
   const dashboardQ = useQuery({
     queryKey: ["ot", "dashboard"],
@@ -134,8 +283,10 @@ export default function OtClaimsPage() {
       const res = await api.get("/api/ot/dashboard");
       return res.data?.summary || {};
     },
-    staleTime: 15_000,
+    staleTime: 60_000,
     enabled: canAccessOt,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   const claimsQ = useQuery({
@@ -148,8 +299,10 @@ export default function OtClaimsPage() {
       const res = await api.get(`/api/ot/claims?${params.toString()}`);
       return Array.isArray(res.data?.claims) ? res.data.claims : [];
     },
-    staleTime: 8_000,
+    staleTime: 60_000,
     enabled: canAccessOt,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   const selectedClaimQ = useQuery({
@@ -159,6 +312,13 @@ export default function OtClaimsPage() {
       return res.data;
     },
     enabled: canAccessOt && !!selectedClaimId,
+    staleTime: 15 * 60_000,
+    gcTime: 30 * 60_000,
+    retry: false,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchInterval: false,
   });
 
   const policyQ = useQuery({
@@ -167,8 +327,29 @@ export default function OtClaimsPage() {
       const res = await api.get("/api/ot/policy/active");
       return res.data?.policy || null;
     },
-    staleTime: 30_000,
+    staleTime: 60_000,
     enabled: canAccessOt,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+
+  const otNotificationsQ = useQuery({
+    queryKey: ["notifications", "ot-page", me?.id, me?.role],
+    enabled: canAccessOt && !!me?.id,
+    staleTime: 60_000,
+    refetchInterval: 120_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    queryFn: async () => {
+      const res = await api.get("/api/notifications", {
+        params: { limit: 16 },
+      });
+      const notifications = Array.isArray(res.data?.notifications)
+        ? res.data.notifications.filter((n) => isOtNotification(n))
+        : [];
+      return notifications;
+    },
   });
 
   const refreshCore = () => {
@@ -178,9 +359,10 @@ export default function OtClaimsPage() {
   };
 
   const createClaimMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (payload = {}) => {
       const res = await api.post("/api/ot/claims", {
-        claim_month: month || undefined,
+        claim_month: payload.claim_month || month || undefined,
+        note: payload.note || undefined,
       });
       return res.data;
     },
@@ -210,19 +392,23 @@ export default function OtClaimsPage() {
   });
 
   const addItemMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async ({ claimId }) => {
       const payload = {
         ...itemForm,
         break_minutes: Number(itemForm.break_minutes || 0),
       };
-      const res = await api.post(`/api/ot/claims/${selectedClaimId}/items`, payload);
+      const res = await api.post(`/api/ot/claims/${claimId}/items`, payload);
       return res.data;
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["ot", "claim", selectedClaimId] });
+    onSuccess: (data, vars) => {
+      const targetClaimId = Number(data?.claim?.id || vars?.claimId || selectedClaimId || 0);
+      if (targetClaimId) {
+        setSelectedClaimId(targetClaimId);
+        qc.invalidateQueries({ queryKey: ["ot", "claim", targetClaimId] });
+      }
       qc.invalidateQueries({ queryKey: ["ot", "claims"] });
       qc.invalidateQueries({ queryKey: ["ot", "dashboard"] });
-      setItemForm((p) => ({ ...p, reason: "" }));
+      setItemForm((p) => ({ ...p, reason: "", is_holiday: false }));
       toast.success("OT entry added");
     },
     onError: (err) => toast.error(readErr(err, "Failed to add OT entry")),
@@ -282,8 +468,27 @@ export default function OtClaimsPage() {
     if (status) next.set("status", status);
     if (month) next.set("month", month);
     if (selectedClaimId) next.set("claim_id", String(selectedClaimId));
+    const nextSearch = next.toString();
+    const currentSearch = searchParams.toString();
+    if (nextSearch === currentSearch) return;
     setSearchParams(next, { replace: true });
-  }, [scope, status, month, selectedClaimId, setSearchParams]);
+  }, [scope, status, month, selectedClaimId, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (queryScope !== scope) setScope(queryScope);
+    if (queryStatus !== status) setStatus(queryStatus);
+    if (queryMonth !== month) setMonth(queryMonth);
+    if (queryClaimId !== selectedClaimId) setSelectedClaimId(queryClaimId);
+  }, [
+    queryScope,
+    queryStatus,
+    queryMonth,
+    queryClaimId,
+    scope,
+    status,
+    month,
+    selectedClaimId,
+  ]);
 
   useEffect(() => {
     if (!selectedClaimId && claimsQ.data?.length) {
@@ -324,18 +529,152 @@ export default function OtClaimsPage() {
   const itemWorkDateBsValue = useMemo(() => {
     const iso = norm(itemForm.work_date);
     if (!iso) return adToBs(new Date());
-    const adDate = new Date(`${iso}T00:00:00`);
-    if (Number.isNaN(adDate.getTime())) return adToBs(new Date());
-    return adToBs(adDate);
+    return adToBs(iso);
   }, [itemForm.work_date]);
 
   const itemWorkDateBsLabel = useMemo(() => {
     const iso = norm(itemForm.work_date);
     if (!iso) return "BS date not selected";
-    const adDate = new Date(`${iso}T00:00:00`);
-    if (Number.isNaN(adDate.getTime())) return "BS date not selected";
-    return formatBsDateLong(adToBs(adDate));
+    return formatBsDateLong(adToBs(iso));
   }, [itemForm.work_date]);
+
+  const editableClaimForFilteredMonth = useMemo(() => {
+    if (scope !== "my") return null;
+    return (
+      (claimsQ.data || []).find(
+        (row) => row.claim_month === month && ["DRAFT", "REJECTED"].includes(String(row.status || ""))
+      ) || null
+    );
+  }, [claimsQ.data, month, scope]);
+
+  const itemTargetClaimMonth = useMemo(
+    () => bsMonthKeyFromAdIso(itemForm.work_date) || month || currentBsMonthKey(),
+    [itemForm.work_date, month]
+  );
+
+  const reusableDraftForItemMonth = useMemo(() => {
+    if (scope !== "my") return null;
+    return (
+      (claimsQ.data || []).find(
+        (row) =>
+          row.claim_month === itemTargetClaimMonth &&
+          ["DRAFT", "REJECTED"].includes(String(row.status || ""))
+      ) || null
+    );
+  }, [claimsQ.data, itemTargetClaimMonth, scope]);
+
+  const itemPreview = useMemo(
+    () => buildOtPreview(itemForm, policyQ.data),
+    [itemForm, policyQ.data]
+  );
+
+  const entryTargetSummary = useMemo(() => {
+    if (claim && perms.can_edit && claim.claim_month === itemTargetClaimMonth) {
+      return `Selected claim ${claim.claim_no || `#${claim.id}`}`;
+    }
+    if (reusableDraftForItemMonth) {
+      return `Existing draft ${reusableDraftForItemMonth.claim_no || `#${reusableDraftForItemMonth.id}`}`;
+    }
+    return `New draft for ${formatNepaliMonthKey(itemTargetClaimMonth)}`;
+  }, [claim, itemTargetClaimMonth, perms.can_edit, reusableDraftForItemMonth]);
+
+  async function handleOpenOrCreateClaim(targetMonth = month || currentBsMonthKey()) {
+    try {
+      if (scope === "my" && editableClaimForFilteredMonth && targetMonth === month) {
+        setSelectedClaimId(Number(editableClaimForFilteredMonth.id));
+        toast.success("Opened your existing draft claim");
+        return;
+      }
+      if (targetMonth && targetMonth !== month) {
+        setMonth(targetMonth);
+      }
+      const data = await createClaimMutation.mutateAsync({ claim_month: targetMonth || undefined });
+      const nextId = Number(data?.claim?.id || 0);
+      if (nextId) setSelectedClaimId(nextId);
+    } catch (err) {
+      toast.error(readErr(err, "Failed to prepare OT claim"));
+    }
+  }
+
+  function shiftWorkDate(offsetDays) {
+    const base = parseIsoDateParts(itemForm.work_date || todayLocalIsoDate()) ||
+      parseIsoDateParts(todayLocalIsoDate());
+    if (!base) return;
+    const adDate = new Date(base.year, base.month - 1, base.day, 12, 0, 0, 0);
+    adDate.setDate(adDate.getDate() + Number(offsetDays || 0));
+    const iso = formatLocalDateToIso(adDate);
+    if (!iso) return;
+    setItemForm((p) => ({ ...p, work_date: iso }));
+  }
+
+  function applyDurationPreset(durationMinutes) {
+    const endTime = addMinutesToHm(itemForm.start_time, durationMinutes);
+    if (!endTime) {
+      toast.error("Set a valid start time first");
+      return;
+    }
+    setItemForm((p) => ({ ...p, end_time: endTime }));
+  }
+
+  async function resolveClaimForEntry() {
+    const targetMonth = itemTargetClaimMonth || month || currentBsMonthKey();
+    if (claim && perms.can_edit && claim.claim_month === targetMonth) {
+      return Number(claim.id);
+    }
+    if (scope !== "my") {
+      throw new Error(`Select an editable claim for ${formatNepaliMonthKey(targetMonth)} first.`);
+    }
+    if (targetMonth && targetMonth !== month) {
+      setMonth(targetMonth);
+    }
+    if (reusableDraftForItemMonth) {
+      const draftId = Number(reusableDraftForItemMonth.id || 0);
+      if (draftId) {
+        setSelectedClaimId(draftId);
+        return draftId;
+      }
+    }
+    const created = await createClaimMutation.mutateAsync({ claim_month: targetMonth });
+    const createdId = Number(created?.claim?.id || 0);
+    if (!createdId) throw new Error("Failed to create draft claim");
+    setSelectedClaimId(createdId);
+    return createdId;
+  }
+
+  async function handleAddItem() {
+    if (!norm(itemForm.reason)) {
+      toast.error("Reason is required");
+      return;
+    }
+    if (!itemPreview.valid) {
+      toast.error(itemPreview.message || "Check the OT entry values");
+      return;
+    }
+    try {
+      const claimId = await resolveClaimForEntry();
+      await addItemMutation.mutateAsync({ claimId });
+    } catch (err) {
+      toast.error(readErr(err, err?.message || "Failed to add OT entry"));
+    }
+  }
+
+  const otNotifications = otNotificationsQ.data || [];
+
+  const otNotificationSummary = useMemo(() => {
+    const bucket = new Map();
+    for (const notification of otNotifications) {
+      const meta = getNotificationStageMeta(notification);
+      const current = bucket.get(meta.stage) || { ...meta, count: 0 };
+      current.count += 1;
+      bucket.set(meta.stage, current);
+    }
+    return NOTIFICATION_STAGE_ORDER.map((stage) => bucket.get(stage)).filter(Boolean);
+  }, [otNotifications]);
+
+  const latestOtNotification = otNotifications[0] || null;
+  const latestOtNotificationMeta = latestOtNotification
+    ? getNotificationStageMeta(latestOtNotification)
+    : null;
 
   const canPrintClaim = !!claim && String(claim.status || "").toUpperCase() === "APPROVED";
 
@@ -357,11 +696,7 @@ export default function OtClaimsPage() {
         : items
             .map((i, idx) => {
               const workIso = String(i.work_date || "").slice(0, 10);
-              const bsLabel = (() => {
-                const adDate = new Date(`${workIso}T00:00:00`);
-                if (Number.isNaN(adDate.getTime())) return "";
-                return formatBsDateLong(adToBs(adDate));
-              })();
+              const bsLabel = workIso ? formatBsDateLong(adToBs(workIso)) : "";
               return `
                 <tr>
                   <td>${idx + 1}</td>
@@ -554,10 +889,26 @@ export default function OtClaimsPage() {
   return (
     <div className="space-y-4">
       <div className="rounded-xl border bg-gradient-to-br from-primary/5 via-background to-accent/10 p-4">
-        <h2 className="text-xl font-semibold">OT Claim Management</h2>
-        <p className="text-sm text-muted-foreground">
-          Create overtime claims, run verification workflow, and approve campus OT with full audit trail.
-        </p>
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold">OT Claim Management</h2>
+            <p className="text-sm text-muted-foreground">
+              Create overtime claims, run verification workflow, and approve campus OT with full audit trail.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {["SUPER_ADMIN", "ADMIN", "FINANCE", "CAMPUS_CHIEF"].includes(role) ? (
+              <Button type="button" variant="outline" onClick={() => nav("/operations/ot/reports")}>
+                OT Reports
+              </Button>
+            ) : null}
+            {canManagePolicy ? (
+              <Button type="button" variant="outline" onClick={() => nav("/operations/ot/policy")}>
+                OT Policy
+              </Button>
+            ) : null}
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -640,15 +991,137 @@ export default function OtClaimsPage() {
               ) : null}
               <Button
                 type="button"
-                onClick={() => createClaimMutation.mutate()}
+                onClick={() => handleOpenOrCreateClaim()}
                 disabled={createClaimMutation.isPending}
                 className="inline-flex items-center gap-1.5"
               >
                 <FilePlus2 className="h-4 w-4" />
-                {createClaimMutation.isPending ? "Creating..." : "New Claim"}
+                {createClaimMutation.isPending
+                  ? "Preparing..."
+                  : editableClaimForFilteredMonth
+                  ? "Open Draft"
+                  : "New Claim"}
               </Button>
             </div>
           </div>
+        </CardContent>
+      </Card>
+      <Card className="border-primary/15 bg-background/80 shadow-sm backdrop-blur-sm">
+        <CardContent className="p-2.5">
+          {otNotificationsQ.isLoading ? (
+            <div className="flex items-center gap-2 rounded-xl border border-dashed px-3 py-2 text-sm text-muted-foreground">
+              <Bell className="h-4 w-4" />
+              <span>Loading OT notifications...</span>
+            </div>
+          ) : otNotifications.length === 0 ? (
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-dashed px-3 py-2 text-sm text-muted-foreground">
+              <span>No OT workflow notifications right now.</span>
+              <Bell className="h-4 w-4" />
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+                <div className="flex min-w-0 flex-1 items-center gap-2 rounded-2xl border border-primary/10 bg-primary/[0.035] px-2.5 py-2">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-primary/15 bg-background text-primary shadow-sm">
+                    <Bell className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                      <span className="text-sm font-semibold text-foreground">OT Inbox</span>
+                      <Badge variant="outline">{otNotifications.length}</Badge>
+                      {latestOtNotificationMeta ? (
+                        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${latestOtNotificationMeta.badgeClass}`}>
+                          {latestOtNotificationMeta.label}
+                        </span>
+                      ) : null}
+                      {latestOtNotification ? <span>{timeAgo(latestOtNotification.created_at)}</span> : null}
+                    </div>
+                    <div className="truncate text-sm font-medium text-foreground">
+                      {latestOtNotification?.title || "OT workflow notifications"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 xl:justify-end">
+                  {otNotificationSummary.map((item) => (
+                    <span
+                      key={item.stage}
+                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${item.badgeClass}`}
+                    >
+                      {item.label} {item.count}
+                    </span>
+                  ))}
+                  {latestOtNotification ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8"
+                      onClick={() => {
+                        const path = String(latestOtNotification.action_path || "").trim();
+                        if (path) nav(path);
+                      }}
+                    >
+                      {latestOtNotification.action_label || "Open latest"}
+                    </Button>
+                  ) : null}
+                  {otNotifications.length > 1 ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 gap-1 px-2"
+                      onClick={() => setIsOtInboxExpanded((v) => !v)}
+                    >
+                      {isOtInboxExpanded ? "Hide" : "Details"}
+                      {isOtInboxExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+
+              {isOtInboxExpanded ? (
+                <div className="rounded-2xl border bg-background/65 p-2">
+                  <div className="grid gap-2 lg:grid-cols-2 xl:grid-cols-3">
+                    {otNotifications.map((notification, idx) => {
+                      const stageMeta = getNotificationStageMeta(notification);
+                      return (
+                        <button
+                          key={notification.id || `${idx}`}
+                          type="button"
+                          className={[
+                            "flex min-h-[88px] w-full flex-col justify-between rounded-xl border px-3 py-2 text-left transition-colors",
+                            stageMeta.itemClass,
+                          ].join(" ")}
+                          onClick={() => {
+                            const path = String(notification.action_path || "").trim();
+                            if (path) nav(path);
+                          }}
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${stageMeta.badgeClass}`}>
+                                {stageMeta.label}
+                              </span>
+                              <span className="text-[11px] text-muted-foreground">
+                                {timeAgo(notification.created_at)}
+                              </span>
+                            </div>
+                            <div className="line-clamp-1 text-sm font-medium text-foreground">
+                              {notification.title || "Notification"}
+                            </div>
+                            <div className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                              {notification.message || ""}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -709,8 +1182,28 @@ export default function OtClaimsPage() {
         <Card className="xl:col-span-8">
           <CardContent className="p-4 space-y-4">
             {!selectedClaimId ? (
-              <div className="text-sm text-muted-foreground">
-                Select a claim to continue.
+              <div className="space-y-3 rounded-lg border border-dashed p-4 text-sm">
+                <div className="text-muted-foreground">
+                  No claim is selected yet. Open your draft for this month or create a fresh one.
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    onClick={() => handleOpenOrCreateClaim()}
+                    disabled={createClaimMutation.isPending}
+                    className="inline-flex items-center gap-1.5"
+                  >
+                    <FilePlus2 className="h-4 w-4" />
+                    {editableClaimForFilteredMonth
+                      ? `Open ${editableClaimForFilteredMonth.claim_no || `draft #${editableClaimForFilteredMonth.id}`}`
+                      : `Create ${formatNepaliMonthKey(month)}`}
+                  </Button>
+                  {scope !== "my" ? (
+                    <span className="self-center text-xs text-muted-foreground">
+                      Tip: switch to My Claims for one-tap draft creation.
+                    </span>
+                  ) : null}
+                </div>
               </div>
             ) : selectedClaimQ.isLoading ? (
               <div className="text-sm text-muted-foreground">Loading claim details...</div>
@@ -776,11 +1269,40 @@ export default function OtClaimsPage() {
                 </div>
 
                 {perms.can_edit ? (
-                  <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
-                    <div className="text-sm font-medium inline-flex items-center gap-1.5">
-                      <BriefcaseBusiness className="h-4 w-4" />
-                      Add OT Entry
+                  <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <div className="text-sm font-medium inline-flex items-center gap-1.5">
+                          <BriefcaseBusiness className="h-4 w-4" />
+                          Quick OT Entry
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Pick the work date, time, and reason. The app will use the correct monthly draft claim automatically.
+                        </div>
+                      </div>
+                      <Badge variant="outline">{formatNepaliMonthKey(itemTargetClaimMonth)}</Badge>
                     </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="button" size="sm" variant="outline" onClick={() => shiftWorkDate(0)}>
+                        Today
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" onClick={() => shiftWorkDate(-1)}>
+                        Yesterday
+                      </Button>
+                      {DURATION_PRESETS.map((preset) => (
+                        <Button
+                          key={preset.label}
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => applyDurationPreset(preset.minutes)}
+                        >
+                          {preset.label}
+                        </Button>
+                      ))}
+                    </div>
+
                     <div className="grid grid-cols-1 gap-2 md:grid-cols-6">
                       <Button
                         type="button"
@@ -817,12 +1339,41 @@ export default function OtClaimsPage() {
                       />
                       <Button
                         type="button"
-                        onClick={() => addItemMutation.mutate()}
-                        disabled={!norm(itemForm.reason) || addItemMutation.isPending}
+                        onClick={handleAddItem}
+                        disabled={
+                          !norm(itemForm.reason) ||
+                          !itemPreview.valid ||
+                          addItemMutation.isPending ||
+                          createClaimMutation.isPending
+                        }
                       >
-                        Add
+                        {addItemMutation.isPending ? "Saving..." : "Add Entry"}
                       </Button>
                     </div>
+
+                    <div className="rounded-md border bg-background/80 px-3 py-2 text-xs text-muted-foreground">
+                      <div className="flex flex-wrap gap-x-4 gap-y-1">
+                        <span>
+                          <span className="font-medium text-foreground">Target claim:</span> {entryTargetSummary}
+                        </span>
+                        {itemPreview.valid ? (
+                          <>
+                            <span>
+                              <span className="font-medium text-foreground">Hours:</span> {itemPreview.hours.toFixed(2)}
+                            </span>
+                            <span>
+                              <span className="font-medium text-foreground">Amount:</span> NPR {itemPreview.amount.toFixed(2)}
+                            </span>
+                            <span>
+                              <span className="font-medium text-foreground">Rate:</span> x{itemPreview.multiplier.toFixed(2)} {itemPreview.rateTypeLabel}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-amber-700">{itemPreview.message}</span>
+                        )}
+                      </div>
+                    </div>
+
                     <label className="text-xs text-muted-foreground inline-flex items-center gap-2">
                       <input
                         type="checkbox"
@@ -844,7 +1395,7 @@ export default function OtClaimsPage() {
                     <NepaliCalendar
                       value={itemWorkDateBsValue}
                       onChange={({ adDate }) => {
-                        const iso = toIsoDate(adDate);
+                        const iso = formatLocalDateToIso(adDate);
                         if (iso) {
                           setItemForm((p) => ({ ...p, work_date: iso }));
                           setIsBsCalendarOpen(false);

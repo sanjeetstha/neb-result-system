@@ -4,6 +4,8 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "../ui/button";
 import { cn } from "../../lib/utils";
 import {
+  BS_MAX_YEAR,
+  BS_MIN_YEAR,
   BS_MONTH_NAMES,
   NEPALI_FONT_STACK,
   WEEK_DAYS_NP,
@@ -21,7 +23,9 @@ import {
 
 function buildYearRange(centerYear, span = 20) {
   const years = [];
-  for (let y = centerYear - span; y <= centerYear + span; y += 1) years.push(y);
+  const start = Math.max(BS_MIN_YEAR, Number(centerYear) - span);
+  const end = Math.min(BS_MAX_YEAR, Number(centerYear) + span);
+  for (let y = start; y <= end; y += 1) years.push(y);
   return years;
 }
 
@@ -81,24 +85,27 @@ export default function NepaliCalendar({
 
   function goToToday() {
     const today = adToBs(new Date());
+    const todayAdDate = bsToAd(today);
     setSelectedBs(today);
     setViewYear(today.year);
     setViewMonth(today.month);
     onChange?.({
       bsDate: today,
-      adDate: bsToAd(today),
-      weekdayIndex: bsToAd(today).getDay(),
+      adDate: todayAdDate,
+      weekdayIndex: todayAdDate.getDay(),
     });
   }
 
   function goPrevMonth() {
     const prev = getPreviousBsMonth(viewYear, viewMonth);
+    if (prev.year === viewYear && prev.month === viewMonth) return;
     setViewYear(prev.year);
     setViewMonth(prev.month);
   }
 
   function goNextMonth() {
     const next = getNextBsMonth(viewYear, viewMonth);
+    if (next.year === viewYear && next.month === viewMonth) return;
     setViewYear(next.year);
     setViewMonth(next.month);
   }

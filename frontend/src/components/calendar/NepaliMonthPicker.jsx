@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 
 import { cn } from "../../lib/utils";
-import { BS_MONTH_NAMES, adToBs, toNepaliDigits } from "./nepaliCalendarEngine";
+import { BS_MAX_YEAR, BS_MIN_YEAR, BS_MONTH_NAMES, adToBs, toNepaliDigits } from "./nepaliCalendarEngine";
 
 function parseMonthKey(value) {
   const m = String(value || "").trim().match(/^(\d{4})-(0[1-9]|1[0-2])$/);
@@ -32,7 +32,9 @@ export default function NepaliMonthPicker({
   const parsed = parseMonthKey(value) || { year: currentBs.year, month: currentBs.month };
   const years = useMemo(() => {
     const out = [];
-    for (let y = currentBs.year - yearSpan; y <= currentBs.year + yearSpan; y += 1) {
+    const start = Math.max(BS_MIN_YEAR, currentBs.year - yearSpan);
+    const end = Math.min(BS_MAX_YEAR, currentBs.year + yearSpan);
+    for (let y = start; y <= end; y += 1) {
       out.push(y);
     }
     return out;
@@ -75,4 +77,3 @@ export default function NepaliMonthPicker({
     </div>
   );
 }
-

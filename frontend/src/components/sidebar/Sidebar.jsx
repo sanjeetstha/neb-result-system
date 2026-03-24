@@ -112,6 +112,7 @@ export default function Sidebar({
         icon: BriefcaseBusiness,
         children: [
           { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
+          { label: "OT Reports", path: "/operations/ot/reports", icon: BarChart3 },
           { label: "OT Policy", path: "/operations/ot/policy", icon: Settings },
         ],
       },
@@ -164,6 +165,7 @@ export default function Sidebar({
         icon: BriefcaseBusiness,
         children: [
           { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
+          { label: "OT Reports", path: "/operations/ot/reports", icon: BarChart3 },
           { label: "OT Policy", path: "/operations/ot/policy", icon: Settings },
         ],
       },
@@ -222,7 +224,10 @@ export default function Sidebar({
       {
         label: "Operations",
         icon: BriefcaseBusiness,
-        children: [{ label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness }],
+        children: [
+          { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
+          { label: "OT Reports", path: "/operations/ot/reports", icon: BarChart3 },
+        ],
       },
       {
         label: "Account",
@@ -277,7 +282,10 @@ export default function Sidebar({
       {
         label: "Operations",
         icon: BriefcaseBusiness,
-        children: [{ label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness }],
+        children: [
+          { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
+          { label: "OT Reports", path: "/operations/ot/reports", icon: BarChart3 },
+        ],
       },
       {
         label: "Account",

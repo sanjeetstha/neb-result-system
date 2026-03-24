@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Menu,
   Moon,
@@ -27,6 +27,7 @@ import { api } from "../../lib/api";
 import { toggleTheme, getTheme } from "../../lib/theme";
 import { useAppSettings } from "../../lib/appSettings";
 import { useProfileSettings } from "../../lib/profileSettings";
+import { getNotificationStageMeta } from "../../lib/notifications";
 
 function timeAgo(input) {
   if (!input) return "";
@@ -44,6 +45,7 @@ function timeAgo(input) {
 
 export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed, onLogout }) {
   const nav = useNavigate();
+  const qc = useQueryClient();
   const initials = useMemo(() => {
     const s = String(me?.name || me?.email || "U").trim();
     const parts = s.split(/\s+/).filter(Boolean);
@@ -98,8 +100,8 @@ export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed,
   const activeUsersQ = useQuery({
     queryKey: ["users", "active", "topbar"],
     enabled: isSuperAdmin,
-    staleTime: 15_000,
-    refetchInterval: 30_000,
+    staleTime: 60_000,
+    refetchInterval: 120_000,
     retry: false,
     queryFn: async () => {
       const res = await api.get("/api/users/active", {
@@ -118,8 +120,8 @@ export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed,
   const notificationsQ = useQuery({
     queryKey: ["notifications", "topbar", me?.id, me?.role],
     enabled: !!me?.id,
-    staleTime: 10_000,
-    refetchInterval: 20_000,
+    staleTime: 45_000,
+    refetchInterval: 120_000,
     retry: false,
     queryFn: async () => {
       const res = await api.get("/api/notifications", {
@@ -136,6 +138,55 @@ export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed,
   });
   const notifications = notificationsQ.data?.notifications || [];
   const notificationCount = Number(notificationsQ.data?.count || 0);
+  const unseenNotificationIds = useMemo(
+    () =>
+      notifications
+        .filter((item) => !item?.is_seen)
+        .map((item) => String(item.id || "").trim())
+        .filter(Boolean),
+    [notifications]
+  );
+
+  const markSeenMutation = useMutation({
+    mutationFn: async (ids) => {
+      const safeIds = Array.isArray(ids)
+        ? [...new Set(ids.map((item) => String(item || "").trim()).filter(Boolean))]
+        : [];
+      if (!safeIds.length) return { ok: true, ids: [] };
+      const res = await api.post("/api/notifications/mark-seen", { ids: safeIds });
+      return res.data;
+    },
+    onSuccess: (data) => {
+      const seenIds = new Set(Array.isArray(data?.ids) ? data.ids.map((item) => String(item)) : []);
+      if (!seenIds.size) return;
+      qc.setQueriesData({ queryKey: ["notifications"] }, (current) => {
+        if (!current || !Array.isArray(current.notifications)) return current;
+        const nextNotifications = current.notifications.map((item) => {
+          const id = String(item?.id || "");
+          if (!seenIds.has(id)) return item;
+          return {
+            ...item,
+            is_seen: true,
+            seen_at: item?.seen_at || new Date().toISOString(),
+          };
+        });
+        const nextCount = nextNotifications.reduce(
+          (sum, item) => sum + (item?.is_seen ? 0 : 1),
+          0
+        );
+        return {
+          ...current,
+          notifications: nextNotifications,
+          count: nextCount,
+        };
+      });
+    },
+  });
+
+  useEffect(() => {
+    if (!notifOpen || !unseenNotificationIds.length || markSeenMutation.isPending) return;
+    markSeenMutation.mutate(unseenNotificationIds);
+  }, [notifOpen, unseenNotificationIds, markSeenMutation]);
 
   return (
     <header className={`sticky top-0 z-20 ${headerClass}`}>
@@ -295,35 +346,36 @@ export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed,
             </DropdownMenu>
           ) : null}
           {settings.notifications_enabled ? (
-            <div
-              className="relative"
-              onMouseEnter={() => setNotifOpen(true)}
-              onMouseLeave={() => setNotifOpen(false)}
+            <DropdownMenu
+              open={notifOpen}
+              onOpenChange={(open) => {
+                setNotifOpen(open);
+                if (open) {
+                  notificationsQ.refetch();
+                }
+              }}
+              modal={false}
             >
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Notifications"
-                className="text-foreground relative"
-                onClick={() => setNotifOpen((v) => !v)}
-              >
-                <Bell className="h-5 w-5" />
-                {notificationCount > 0 ? (
-                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] leading-[18px] font-semibold text-center shadow-md animate-in fade-in zoom-in-75 duration-200">
-                    {notificationCount > 99 ? "99+" : notificationCount}
-                  </span>
-                ) : null}
-              </Button>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Notifications"
+                  className="text-foreground relative"
+                >
+                  <Bell className="h-5 w-5" />
+                  {notificationCount > 0 ? (
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] leading-[18px] font-semibold text-center shadow-md animate-in fade-in zoom-in-75 duration-200">
+                      {notificationCount > 99 ? "99+" : notificationCount}
+                    </span>
+                  ) : null}
+                </Button>
+              </DropdownMenuTrigger>
 
-              <div
-                className={[
-                  "absolute right-0 top-11 z-40 w-80 rounded-xl border bg-background/95 p-2 backdrop-blur",
-                  "shadow-[0_14px_30px_rgba(15,23,42,0.16)]",
-                  "transition-all duration-150",
-                  notifOpen
-                    ? "opacity-100 translate-y-0 scale-100 pointer-events-auto"
-                    : "opacity-0 translate-y-1 scale-95 pointer-events-none",
-                ].join(" ")}
+              <DropdownMenuContent
+                align="end"
+                sideOffset={10}
+                className="z-50 w-80 rounded-xl border bg-background/95 p-2 backdrop-blur shadow-[0_14px_30px_rgba(15,23,42,0.16)]"
               >
                 <div className="px-2 py-1.5 flex items-center justify-between">
                   <div className="text-sm font-semibold">Notifications</div>
@@ -337,37 +389,46 @@ export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed,
                     No pending notifications
                   </div>
                 ) : (
-                  <div className="max-h-80 overflow-auto">
-                    {notifications.map((n, idx) => (
-                      <button
-                        key={n.id || `${idx}`}
-                        className="w-full text-left rounded-md px-2 py-2 hover:bg-muted/60 transition-colors"
-                        onClick={() => {
-                          const path = String(n.action_path || "").trim();
-                          if (path) nav(path);
-                          setNotifOpen(false);
-                        }}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <span className="text-sm font-medium leading-tight">
-                            {n.title || "Notification"}
-                          </span>
-                          <span className="text-[10px] text-muted-foreground shrink-0">
-                            {timeAgo(n.created_at)}
-                          </span>
-                        </div>
-                        <div className="mt-0.5 text-xs text-muted-foreground leading-tight">
-                          {n.message || ""}
-                        </div>
-                        <div className="mt-0.5 text-[11px] text-primary">
-                          {n.action_label || "Open task"}
-                        </div>
-                      </button>
-                    ))}
+                  <div className="max-h-80 overflow-auto pr-1">
+                    {notifications.map((n, idx) => {
+                      const stageMeta = getNotificationStageMeta(n);
+                      return (
+                        <button
+                          key={n.id || `${idx}`}
+                          type="button"
+                          className={`mb-2 w-full rounded-lg border px-2.5 py-2.5 text-left transition-colors last:mb-0 ${stageMeta.itemClass} ${n.is_seen ? "opacity-70" : "shadow-sm"}`}
+                          onClick={() => {
+                            const path = String(n.action_path || "").trim();
+                            if (path) nav(path);
+                            setNotifOpen(false);
+                          }}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="text-sm font-medium leading-tight text-foreground">
+                              {n.title || "Notification"}
+                            </span>
+                            <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${stageMeta.badgeClass}`}>
+                              {stageMeta.label}
+                            </span>
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground leading-tight">
+                            {n.message || ""}
+                          </div>
+                          <div className="mt-1.5 flex items-center justify-between gap-2">
+                            <span className="text-[11px] font-medium text-primary">
+                              {n.action_label || "Open task"}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground shrink-0">
+                              {timeAgo(n.created_at)}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
-              </div>
-            </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
           ) : null}
           {/* Animated Theme Toggle */}
           <Button

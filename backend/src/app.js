@@ -25,7 +25,20 @@ const otRoutes = require("./routes/ot.routes");
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
-app.use(morgan("dev"));
+app.use(
+  morgan("dev", {
+    skip: (req) => {
+      if (req.method !== "GET") return false;
+      const path = String(req.path || req.originalUrl || "");
+      return [
+        "/api/notifications",
+        "/api/users/active",
+        "/api/ot/dashboard",
+        "/api/ot/policy/active",
+      ].includes(path);
+    },
+  })
+);
 app.use("/api/auth", authRoutes);
 // app.use("/api/me", meRoutes);
 const meRoutes = require("./routes/me.routes");

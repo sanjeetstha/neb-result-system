@@ -1,5 +1,21 @@
 const db = require("../db");
 
+let notificationsSchemaReady = null;
+
+async function ensureNotificationsSchema() {
+  if (notificationsSchemaReady) return notificationsSchemaReady;
+  notificationsSchemaReady = db.query(`
+    CREATE TABLE IF NOT EXISTS notification_reads (
+      user_id BIGINT NOT NULL,
+      notification_id VARCHAR(190) NOT NULL,
+      seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, notification_id),
+      INDEX idx_notification_reads_seen (user_id, seen_at)
+    )
+  `);
+  return notificationsSchemaReady;
+}
+
 function toInt(v, fallback) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
@@ -9,6 +25,8 @@ function push(arr, item) {
   arr.push({
     id: String(item.id || `${item.type}:${Date.now()}:${arr.length}`),
     type: String(item.type || "INFO"),
+    category: String(item.category || "GENERAL"),
+    stage: String(item.stage || ""),
     title: String(item.title || "Notification"),
     message: String(item.message || ""),
     action_path: String(item.action_path || ""),
@@ -20,6 +38,7 @@ function push(arr, item) {
 
 async function listMyNotifications(req, res) {
   try {
+    await ensureNotificationsSchema();
     const uid = Number(req.user?.uid || 0);
     const role = String(req.user?.role || "").trim().toUpperCase();
     if (!uid || !role) {
@@ -237,9 +256,11 @@ async function listMyNotifications(req, res) {
           push(notifications, {
             id: `otverify:${r.id}`,
             type: "OT_VERIFY",
+            category: "OT",
+            stage: "PENDING_VERIFY",
             title: "OT Verification Required",
             message: `${r.claim_no || `Claim #${r.id}`} • ${r.full_name} (${r.claim_month})`,
-            action_path: `/operations/ot?scope=pending_verify&claim_id=${r.id}`,
+            action_path: `/operations/ot?scope=pending_verify&month=${encodeURIComponent(r.claim_month || "")}&claim_id=${r.id}`,
             action_label: "Review OT",
             created_at: r.submitted_at || r.updated_at,
             priority: "high",
@@ -276,12 +297,51 @@ async function listMyNotifications(req, res) {
           push(notifications, {
             id: `otapprove:${r.id}`,
             type: "OT_APPROVE",
+            category: "OT",
+            stage: "PENDING_APPROVE",
             title: "OT Approval Required",
             message: `${r.claim_no || `Claim #${r.id}`} • ${r.full_name} (${r.claim_month})`,
-            action_path: `/operations/ot?scope=pending_approve&claim_id=${r.id}`,
+            action_path: `/operations/ot?scope=pending_approve&month=${encodeURIComponent(r.claim_month || "")}&claim_id=${r.id}`,
             action_label: "Approve OT",
             created_at: r.verified_at || r.updated_at,
             priority: "high",
+          });
+        }
+      }
+    } catch {
+      // OT module not initialized yet.
+    }
+
+    try {
+      if (
+        role === "TEACHER" ||
+        role === "FINANCE" ||
+        role === "ADMIN" ||
+        role === "SUPER_ADMIN" ||
+        role === "CAMPUS_CHIEF"
+      ) {
+        const [rows] = await db.query(
+          `SELECT c.id, c.claim_no, c.claim_month, c.status, c.updated_at
+           FROM ot_claims c
+           WHERE c.staff_user_id=?
+             AND c.status IN ('DRAFT','SUBMITTED')
+             AND c.updated_at >= DATE_SUB(NOW(), INTERVAL 14 DAY)
+           ORDER BY c.updated_at DESC
+           LIMIT ?`,
+          [uid, limit]
+        );
+        for (const r of rows) {
+          push(notifications, {
+            id: `otopen:${r.id}`,
+            type: String(r.status).toUpperCase() === "DRAFT" ? "OT_DRAFT" : "OT_SUBMITTED",
+            category: "OT",
+            stage: String(r.status || "").toUpperCase(),
+            title: `OT Claim ${String(r.status).toLowerCase()}`,
+            message: `${r.claim_no || `Claim #${r.id}`} (${r.claim_month})`,
+            action_path: `/operations/ot?scope=my&status=${encodeURIComponent(String(r.status || "").toUpperCase())}&month=${encodeURIComponent(r.claim_month || "")}&claim_id=${r.id}`,
+            action_label: String(r.status).toUpperCase() === "DRAFT" ? "Continue Draft" : "Open Submitted Claim",
+            created_at: r.updated_at,
+            priority: String(r.status).toUpperCase() === "SUBMITTED" ? "high" : "normal",
           });
         }
       }
@@ -311,9 +371,11 @@ async function listMyNotifications(req, res) {
           push(notifications, {
             id: `otmine:${r.id}`,
             type: "OT_STATUS",
+            category: "OT",
+            stage: String(r.status || "").toUpperCase(),
             title: `OT Claim ${String(r.status).toLowerCase()}`,
             message: `${r.claim_no || `Claim #${r.id}`} (${r.claim_month})`,
-            action_path: `/operations/ot?scope=my&claim_id=${r.id}`,
+            action_path: `/operations/ot?scope=my&month=${encodeURIComponent(r.claim_month || "")}&claim_id=${r.id}`,
             action_label: "Open Claim",
             created_at: r.updated_at,
             priority: "normal",
@@ -327,11 +389,45 @@ async function listMyNotifications(req, res) {
     notifications.sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
-    const out = notifications.slice(0, limit);
+
+    const notificationIds = [...new Set(
+      notifications
+        .map((item) => String(item.id || "").trim().slice(0, 190))
+        .filter(Boolean)
+    )];
+
+    const seenMap = new Map();
+    if (notificationIds.length) {
+      const placeholders = notificationIds.map(() => "?").join(", ");
+      const [seenRows] = await db.query(
+        `SELECT notification_id, seen_at
+         FROM notification_reads
+         WHERE user_id=?
+           AND notification_id IN (${placeholders})`,
+        [uid, ...notificationIds]
+      );
+      for (const row of seenRows) {
+        seenMap.set(String(row.notification_id), row.seen_at);
+      }
+    }
+
+    const enriched = notifications.map((item) => {
+      const notificationId = String(item.id || "").trim().slice(0, 190);
+      const seenAt = notificationId ? seenMap.get(notificationId) || null : null;
+      return {
+        ...item,
+        seen_at: seenAt,
+        is_seen: !!seenAt,
+      };
+    });
+
+    const out = enriched.slice(0, limit);
+    const unreadCount = enriched.reduce((sum, item) => sum + (item.is_seen ? 0 : 1), 0);
 
     return res.json({
       ok: true,
-      count: out.length,
+      count: unreadCount,
+      total: enriched.length,
       notifications: out,
     });
   } catch (e) {
@@ -342,4 +438,47 @@ async function listMyNotifications(req, res) {
   }
 }
 
-module.exports = { listMyNotifications };
+
+async function markNotificationsSeen(req, res) {
+  try {
+    await ensureNotificationsSchema();
+    const uid = Number(req.user?.uid || 0);
+    if (!uid) {
+      return res.status(401).json({ ok: false, message: "Invalid session" });
+    }
+
+    const ids = Array.isArray(req.body?.ids)
+      ? [...new Set(
+          req.body.ids
+            .map((item) => String(item || "").trim().slice(0, 190))
+            .filter(Boolean)
+        )]
+      : [];
+
+    if (!ids.length) {
+      return res.json({ ok: true, updated: 0 });
+    }
+
+    const valuesSql = ids.map(() => "(?, ?, NOW())").join(", ");
+    const params = [];
+    for (const id of ids) {
+      params.push(uid, id);
+    }
+
+    await db.query(
+      `INSERT INTO notification_reads (user_id, notification_id, seen_at)
+       VALUES ${valuesSql}
+       ON DUPLICATE KEY UPDATE seen_at=VALUES(seen_at)`,
+      params
+    );
+
+    return res.json({ ok: true, updated: ids.length, ids });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      message: e?.message || "Failed to update notifications",
+    });
+  }
+}
+
+module.exports = { listMyNotifications, markNotificationsSeen };
