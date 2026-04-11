@@ -4,6 +4,8 @@ import { toast } from "sonner";
 
 import { api } from "../../lib/api";
 import { useMe } from "../../lib/useMe";
+import { hasPermission } from "../../lib/access";
+import { INTERNAL_ROLE_OPTIONS, formatRoleLabel } from "../../lib/roles";
 import { usePagination } from "../../lib/usePagination";
 
 import { Card, CardContent } from "../../components/ui/card";
@@ -31,15 +33,6 @@ function norm(v) {
   return String(v ?? "").trim();
 }
 
-function roleLabel(role) {
-  const r = String(role || "").trim().toUpperCase();
-  if (r === "FINANCE") return "Finance";
-  if (r === "EXAM_HEAD") return "Exam Head";
-  if (r === "CAMPUS_CHIEF") return "Campus Chief";
-  if (r === "ASSISTANT_CAMPUS_CHIEF") return "Asst Campus Chief";
-  return r || "—";
-}
-
 export default function UsersPage() {
   const { data: me, isLoading: meLoading } = useMe();
   const qc = useQueryClient();
@@ -64,7 +57,7 @@ export default function UsersPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deletePassword, setDeletePassword] = useState("");
 
-  const canAccess = useMemo(() => me?.role === "SUPER_ADMIN", [me]);
+  const canAccess = useMemo(() => hasPermission(me, "users.manage"), [me]);
 
   const usersQ = useQuery({
     queryKey: ["users", "list"],
@@ -219,7 +212,7 @@ export default function UsersPage() {
           <CardContent className="p-4">
             <div className="text-lg font-semibold">Access denied</div>
             <div className="text-sm text-muted-foreground mt-1">
-              Only <span className="font-medium">SUPER_ADMIN</span> can manage users.
+              You do not have permission to manage users.
             </div>
           </CardContent>
         </Card>
@@ -280,7 +273,7 @@ export default function UsersPage() {
                         {u.contact_number || "—"}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">{roleLabel(u.role)}</Badge>
+                        <Badge variant="outline">{formatRoleLabel(u.role)}</Badge>
                       </TableCell>
                       <TableCell>
                         {u.is_active ? (
@@ -382,16 +375,11 @@ export default function UsersPage() {
                 value={editForm.role}
                 onChange={(e) => setEditForm((p) => ({ ...p, role: e.target.value }))}
               >
-                <option value="SUPER_ADMIN">SUPER_ADMIN</option>
-                <option value="ADMIN">ADMIN</option>
-                <option value="FINANCE">FINANCE</option>
-                <option value="TEACHER">TEACHER</option>
-                <option value="EXAM_HEAD">EXAM_HEAD (Exam Head)</option>
-                <option value="CAMPUS_CHIEF">CAMPUS_CHIEF (Campus Chief)</option>
-                <option value="ASSISTANT_CAMPUS_CHIEF">
-                  ASSISTANT_CAMPUS_CHIEF (Asst Campus Chief)
-                </option>
-                <option value="STUDENT">STUDENT</option>
+                {INTERNAL_ROLE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </div>
             <div className="flex justify-end gap-2">

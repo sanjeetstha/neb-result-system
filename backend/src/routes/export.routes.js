@@ -1,31 +1,8 @@
 const router = require("express").Router();
-const { requireAuth, requireRole } = require("../middlewares/auth");
+const { requireAuth, requirePermission } = require("../middlewares/auth");
 const { marksheetPdf, listMarksheetStudents } = require("../controllers/export.controller");
 
-router.get(
-  "/marksheet.pdf",
-  requireAuth,
-  requireRole(
-    "SUPER_ADMIN",
-    "ADMIN",
-    "EXAM_HEAD",
-    "CAMPUS_CHIEF",
-    "ASSISTANT_CAMPUS_CHIEF"
-  ),
-  marksheetPdf
-);
-router.get(
-  "/marksheet/students",
-  requireAuth,
-  requireRole(
-    "SUPER_ADMIN",
-    "ADMIN",
-    "TEACHER",
-    "EXAM_HEAD",
-    "CAMPUS_CHIEF",
-    "ASSISTANT_CAMPUS_CHIEF"
-  ),
-  listMarksheetStudents
-);
+router.get("/marksheet.pdf", requireAuth, requirePermission("results.marksheet"), marksheetPdf);
+router.get("/marksheet/students", requireAuth, requirePermission("results.marksheet"), listMarksheetStudents);
 
 module.exports = router;

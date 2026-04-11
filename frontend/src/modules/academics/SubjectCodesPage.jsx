@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import { api } from "../../lib/api";
 import { useMe } from "../../lib/useMe";
+import { hasPermission } from "../../lib/access";
 import { Card, CardContent } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -54,7 +55,7 @@ function sortOptGroups(groups) {
 export default function SubjectCodesPage() {
   const qc = useQueryClient();
   const { data: me } = useMe();
-  const canShift = me?.role === "SUPER_ADMIN";
+  const canShift = hasPermission(me, "academics.manage");
 
   const [academicYearId, setAcademicYearId] = useState("");
   const [classId, setClassId] = useState("");
@@ -246,9 +247,9 @@ export default function SubjectCodesPage() {
               Subjects: {optionalGroups.reduce((acc, g) => acc + (g.subjects?.length || 0), 0)}
             </Badge>
             {canShift ? (
-              <Badge variant="secondary">Shift enabled (SUPER_ADMIN)</Badge>
+              <Badge variant="secondary">Shift enabled</Badge>
             ) : (
-              <Badge variant="outline">Read-only (only SUPER_ADMIN can shift)</Badge>
+              <Badge variant="outline">Read-only</Badge>
             )}
           </div>
         </CardContent>

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import { api } from "../../lib/api";
 import { useMe } from "../../lib/useMe";
+import { hasPermission } from "../../lib/access";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Badge } from "../../components/ui/badge";
@@ -34,7 +35,7 @@ function Select({ label, value, onChange, options, placeholder }) {
 export default function CorrectionsPage() {
   const qc = useQueryClient();
   const { data: me } = useMe();
-  const canReview = me?.role === "SUPER_ADMIN" || me?.role === "ADMIN";
+  const canReview = hasPermission(me, "corrections.review");
 
   const [tab, setTab] = useState("REQUEST"); // REQUEST | REVIEW | MINE
   const [examId, setExamId] = useState("");

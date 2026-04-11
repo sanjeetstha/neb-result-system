@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import { api } from "../../lib/api";
+import { hasPermission } from "../../lib/access";
 import { useMe } from "../../lib/useMe";
 import { getAppSettings } from "../../lib/appSettings";
 import { formatLocalDateToIso, parseIsoDateParts, todayLocalIsoDate } from "../../lib/date";
@@ -242,14 +243,8 @@ export default function OtClaimsPage() {
   const meQ = useMe();
   const me = meQ.data || null;
   const role = String(me?.role || "").toUpperCase();
-  const canAccessOt = [
-    "SUPER_ADMIN",
-    "ADMIN",
-    "FINANCE",
-    "TEACHER",
-    "CAMPUS_CHIEF",
-  ].includes(role);
-  const canManagePolicy = ["SUPER_ADMIN", "ADMIN"].includes(role);
+  const canAccessOt = hasPermission(me, "ot.claims");
+  const canManagePolicy = hasPermission(me, "ot.policy.manage");
 
   const [searchParams, setSearchParams] = useSearchParams();
   const queryScope = norm(searchParams.get("scope")) || "my";

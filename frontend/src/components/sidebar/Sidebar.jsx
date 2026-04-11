@@ -1,44 +1,221 @@
 import { useMemo, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { Input } from "../ui/input";
-import { Button } from "../ui/button";
-import { cn } from "@/lib/utils";
-import { useAppSettings, isLightColor } from "../../lib/appSettings";
-
 import {
-  LayoutDashboard,
-  Building2,
-  Users,
-  ClipboardList,
-  PencilRuler,
+  Armchair,
   BarChart3,
-  BadgeCheck,
-  Globe,
-  LogOut,
-  Search,
-  UserPlus,
-  Mail,
-  ChevronDown,
-  Settings,
-  UserCog,
-  MessageSquare,
-  Printer,
+  Bell,
   BriefcaseBusiness,
+  Building2,
+  ChevronDown,
+  ClipboardList,
+  Globe,
+  KeyRound,
+  LayoutDashboard,
+  LogOut,
+  Mail,
+  MessageSquare,
+  PencilRuler,
+  Printer,
+  Search,
+  Settings,
+  ShieldCheck,
+  UserCog,
+  UserPlus,
+  Users,
 } from "lucide-react";
 
-/**
- * Enhanced Sidebar with animations and improved design
- * - Role-based menu system using MENUS from menu.js
- * - Search bar to filter menus with icon
- * - Works with desktop collapsed + mobile variant
- * - Added hover effects, transitions, and subtle animations
- *
- * Props expected (kept same as your current usage):
- * - me
- * - onLogout
- * - variant: "desktop" | "mobile"
- * - collapsed (desktop only)
- */
+import { cn } from "@/lib/utils";
+import { hasAnyPermission } from "../../lib/access";
+import { useAppSettings, isLightColor } from "../../lib/appSettings";
+import { Input } from "../ui/input";
+import { Button } from "../ui/button";
+
+const MENU_DEFINITIONS = [
+  {
+    label: "Dashboard",
+    path: "/",
+    icon: LayoutDashboard,
+    permissions: ["dashboard.view"],
+    exact: true,
+  },
+  {
+    label: "College",
+    path: "/masters",
+    icon: Building2,
+    permissions: ["college.manage"],
+  },
+  {
+    label: "Students",
+    path: "/students",
+    icon: Users,
+    permissions: ["students.view", "students.manage"],
+  },
+  {
+    label: "Academics",
+    icon: ClipboardList,
+    children: [
+      {
+        label: "Exam Manager",
+        path: "/exams",
+        icon: ClipboardList,
+        permissions: ["exams.view", "exams.manage"],
+      },
+      {
+        label: "Seat Planner",
+        path: "/exams/seat-planner",
+        icon: Armchair,
+        permissions: ["seat_planner.manage"],
+      },
+      {
+        label: "Subject Codes",
+        path: "/academics/subject-codes",
+        icon: KeyRound,
+        permissions: ["academics.view", "academics.manage"],
+      },
+      {
+        label: "Marks Entry",
+        path: "/marks",
+        icon: PencilRuler,
+        permissions: ["marks.view", "marks.entry"],
+      },
+      {
+        label: "Bulk Grid",
+        path: "/marks/grid",
+        icon: PencilRuler,
+        permissions: ["marks.view", "marks.bulk"],
+      },
+    ],
+  },
+  {
+    label: "Results",
+    icon: BarChart3,
+    children: [
+      {
+        label: "Reports",
+        path: "/reports",
+        icon: BarChart3,
+        permissions: ["reports.view"],
+      },
+      {
+        label: "Corrections",
+        path: "/corrections",
+        icon: ShieldCheck,
+        permissions: ["corrections.request", "corrections.review"],
+      },
+      {
+        label: "Bulk SMS",
+        path: "/results/sms",
+        icon: MessageSquare,
+        permissions: ["results.sms"],
+      },
+      {
+        label: "Marksheet Print",
+        path: "/results/marksheet",
+        icon: Printer,
+        permissions: ["results.marksheet"],
+      },
+      {
+        label: "Public Portal",
+        path: "/public/portal",
+        icon: Globe,
+        permissions: ["public.portal"],
+      },
+      {
+        label: "My Results",
+        path: "/my-results",
+        icon: Bell,
+        permissions: ["my_results.view"],
+      },
+    ],
+  },
+  {
+    label: "Operations",
+    icon: BriefcaseBusiness,
+    children: [
+      {
+        label: "OT Claims",
+        path: "/operations/ot",
+        icon: BriefcaseBusiness,
+        permissions: ["ot.claims"],
+      },
+      {
+        label: "OT Reports",
+        path: "/operations/ot/reports",
+        icon: BarChart3,
+        permissions: ["ot.reports"],
+      },
+      {
+        label: "OT Policy",
+        path: "/operations/ot/policy",
+        icon: Settings,
+        permissions: ["ot.policy.manage"],
+      },
+    ],
+  },
+  {
+    label: "Users",
+    icon: Users,
+    children: [
+      {
+        label: "Manage Users",
+        path: "/admin/users",
+        icon: Users,
+        permissions: ["users.manage"],
+      },
+      {
+        label: "Roles & Access",
+        path: "/admin/roles",
+        icon: ShieldCheck,
+        permissions: ["roles.manage"],
+      },
+      {
+        label: "Invites",
+        path: "/admin/invites",
+        icon: Mail,
+        permissions: ["users.invites"],
+      },
+      {
+        label: "Add User",
+        path: "/admin/users/new",
+        icon: UserPlus,
+        permissions: ["users.add"],
+      },
+    ],
+  },
+  {
+    label: "Account",
+    icon: UserCog,
+    children: [
+      { label: "Profile", path: "/account/profile", icon: UserCog },
+      {
+        label: "App Settings",
+        path: "/settings",
+        icon: Settings,
+        permissions: ["settings.manage"],
+      },
+    ],
+  },
+];
+
+function getVisibleMenus(user) {
+  return MENU_DEFINITIONS.reduce((acc, item) => {
+    if (item.children?.length) {
+      const children = item.children.filter((child) =>
+        hasAnyPermission(user, child.permissions)
+      );
+      if (children.length) {
+        acc.push({ ...item, children });
+      }
+      return acc;
+    }
+
+    if (hasAnyPermission(user, item.permissions)) {
+      acc.push(item);
+    }
+    return acc;
+  }, []);
+}
+
 export default function Sidebar({
   me,
   onLogout,
@@ -51,6 +228,7 @@ export default function Sidebar({
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [openGroups, setOpenGroups] = useState({});
   const settings = useAppSettings();
+
   const sidebarIsDark = !isLightColor(settings.sidebar_color);
   const textBase = sidebarIsDark ? "text-white/90" : "text-foreground";
   const textMuted = sidebarIsDark ? "text-white/60" : "text-muted-foreground";
@@ -61,289 +239,34 @@ export default function Sidebar({
     ? "bg-white/10 text-white shadow-sm ring-1 ring-white/10"
     : "bg-gradient-to-r from-primary/10 to-primary/5 font-medium text-primary shadow-sm";
 
-  // ✅ static (later dynamic)
-  const ORG = {
+  const org = {
     name: settings.org_name,
     tagline: settings.tagline,
-    // logoSrc: settings.logo_data_url || settings.logo_small_data_url || null,
+    logoSrc: settings.logo_small_data_url || settings.logo_data_url || "",
   };
 
   const isMobile = variant === "mobile";
   const isCollapsed = isMobile ? false : collapsed;
   const handleNavigate = () => {
-    if (typeof onNavigate === "function") {
-      onNavigate();
-    }
+    if (typeof onNavigate === "function") onNavigate();
   };
 
-  // Get role-based menu items - using the same structure as menu.js
-  const role = me?.role || "STUDENT";
-
-  // Define the menu items directly in this component to avoid import issues
-  const MENUS = {
-    SUPER_ADMIN: [
-      { label: "Dashboard", path: "/", icon: LayoutDashboard },
-      { label: "College", path: "/masters", icon: Building2 },
-      { label: "Students", path: "/students", icon: Users },
-      {
-        label: "Academics",
-        icon: ClipboardList,
-        children: [
-          { label: "Exam Manager", path: "/exams", icon: ClipboardList },
-          { label: "Subject Codes", path: "/academics/subject-codes", icon: ClipboardList },
-          { label: "Marks Entry", path: "/marks", icon: PencilRuler },
-          { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
-        ],
-      },
-      {
-        label: "Results",
-        icon: BarChart3,
-        children: [
-          { label: "Reports", path: "/reports", icon: BarChart3 },
-          { label: "Corrections", path: "/corrections", icon: BadgeCheck },
-          { label: "Bulk SMS", path: "/results/sms", icon: MessageSquare },
-          { label: "Marksheet Print", path: "/results/marksheet", icon: Printer },
-          { label: "Public Portal", path: "/public/portal", icon: Globe },
-          { label: "My Results", path: "/my-results", icon: BadgeCheck },
-        ],
-      },
-      {
-        label: "Operations",
-        icon: BriefcaseBusiness,
-        children: [
-          { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
-          { label: "OT Reports", path: "/operations/ot/reports", icon: BarChart3 },
-          { label: "OT Policy", path: "/operations/ot/policy", icon: Settings },
-        ],
-      },
-      {
-        label: "Users",
-        icon: Users,
-        children: [
-          { label: "Manage Users", path: "/admin/users", icon: Users },
-          { label: "Invites", path: "/admin/invites", icon: Mail },
-          { label: "Add User", path: "/admin/users/new", icon: UserPlus },
-        ],
-      },
-      {
-        label: "Account",
-        icon: UserCog,
-        children: [
-          { label: "Profile", path: "/account/profile", icon: UserCog },
-          { label: "App Settings", path: "/settings", icon: Settings },
-        ],
-      },
-    ],
-    ADMIN: [
-      { label: "Dashboard", path: "/", icon: LayoutDashboard },
-      { label: "College", path: "/masters", icon: Building2 },
-      { label: "Students", path: "/students", icon: Users },
-      {
-        label: "Academics",
-        icon: ClipboardList,
-        children: [
-          { label: "Exam Manager", path: "/exams", icon: ClipboardList },
-          { label: "Subject Codes", path: "/academics/subject-codes", icon: ClipboardList },
-          { label: "Marks Entry", path: "/marks", icon: PencilRuler },
-          { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
-        ],
-      },
-      {
-        label: "Results",
-        icon: BarChart3,
-        children: [
-          { label: "Reports", path: "/reports", icon: BarChart3 },
-          { label: "Corrections", path: "/corrections", icon: BadgeCheck },
-          { label: "Bulk SMS", path: "/results/sms", icon: MessageSquare },
-          { label: "Marksheet Print", path: "/results/marksheet", icon: Printer },
-          { label: "Public Portal", path: "/public/portal", icon: Globe },
-          { label: "My Results", path: "/my-results", icon: BadgeCheck },
-        ],
-      },
-      {
-        label: "Operations",
-        icon: BriefcaseBusiness,
-        children: [
-          { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
-          { label: "OT Reports", path: "/operations/ot/reports", icon: BarChart3 },
-          { label: "OT Policy", path: "/operations/ot/policy", icon: Settings },
-        ],
-      },
-      {
-        label: "Users",
-        icon: Users,
-        children: [
-          { label: "Manage Users", path: "/admin/users", icon: Users },
-          { label: "Invites", path: "/admin/invites", icon: Mail },
-          { label: "Add User", path: "/admin/users/new", icon: UserPlus },
-        ],
-      },
-      {
-        label: "Account",
-        icon: UserCog,
-        children: [
-          { label: "Profile", path: "/account/profile", icon: UserCog },
-          { label: "App Settings", path: "/settings", icon: Settings },
-        ],
-      },
-    ],
-    TEACHER: [
-      { label: "Dashboard", path: "/", icon: LayoutDashboard },
-      {
-        label: "Academics",
-        icon: ClipboardList,
-        children: [
-          { label: "Exam Manager", path: "/exams", icon: ClipboardList },
-          { label: "Marks Entry", path: "/marks", icon: PencilRuler },
-          { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
-        ],
-      },
-      {
-        label: "Results",
-        icon: BarChart3,
-        children: [
-          { label: "Corrections", path: "/corrections", icon: BadgeCheck },
-          { label: "Reports", path: "/reports", icon: BarChart3 },
-          { label: "Bulk SMS", path: "/results/sms", icon: MessageSquare },
-          { label: "Public Portal", path: "/public/portal", icon: Globe },
-        ],
-      },
-      {
-        label: "Operations",
-        icon: BriefcaseBusiness,
-        children: [{ label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness }],
-      },
-      {
-        label: "Account",
-        icon: UserCog,
-        children: [{ label: "Profile", path: "/account/profile", icon: UserCog }],
-      },
-    ],
-    FINANCE: [
-      { label: "Dashboard", path: "/", icon: LayoutDashboard },
-      {
-        label: "Operations",
-        icon: BriefcaseBusiness,
-        children: [
-          { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
-          { label: "OT Reports", path: "/operations/ot/reports", icon: BarChart3 },
-        ],
-      },
-      {
-        label: "Account",
-        icon: UserCog,
-        children: [{ label: "Profile", path: "/account/profile", icon: UserCog }],
-      },
-    ],
-    EXAM_HEAD: [
-      { label: "Dashboard", path: "/", icon: LayoutDashboard },
-      {
-        label: "Academics",
-        icon: ClipboardList,
-        children: [
-          { label: "Exam Manager", path: "/exams", icon: ClipboardList },
-          { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
-        ],
-      },
-      {
-        label: "Results",
-        icon: BarChart3,
-        children: [
-          { label: "Reports", path: "/reports", icon: BarChart3 },
-          { label: "Marksheet Print", path: "/results/marksheet", icon: Printer },
-          { label: "Public Portal", path: "/public/portal", icon: Globe },
-        ],
-      },
-      {
-        label: "Account",
-        icon: UserCog,
-        children: [{ label: "Profile", path: "/account/profile", icon: UserCog }],
-      },
-    ],
-    CAMPUS_CHIEF: [
-      { label: "Dashboard", path: "/", icon: LayoutDashboard },
-      {
-        label: "Academics",
-        icon: ClipboardList,
-        children: [
-          { label: "Exam Manager", path: "/exams", icon: ClipboardList },
-          { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
-        ],
-      },
-      {
-        label: "Results",
-        icon: BarChart3,
-        children: [
-          { label: "Reports", path: "/reports", icon: BarChart3 },
-          { label: "Marksheet Print", path: "/results/marksheet", icon: Printer },
-          { label: "Public Portal", path: "/public/portal", icon: Globe },
-        ],
-      },
-      {
-        label: "Operations",
-        icon: BriefcaseBusiness,
-        children: [
-          { label: "OT Claims", path: "/operations/ot", icon: BriefcaseBusiness },
-          { label: "OT Reports", path: "/operations/ot/reports", icon: BarChart3 },
-        ],
-      },
-      {
-        label: "Account",
-        icon: UserCog,
-        children: [{ label: "Profile", path: "/account/profile", icon: UserCog }],
-      },
-    ],
-    ASSISTANT_CAMPUS_CHIEF: [
-      { label: "Dashboard", path: "/", icon: LayoutDashboard },
-      {
-        label: "Academics",
-        icon: ClipboardList,
-        children: [
-          { label: "Exam Manager", path: "/exams", icon: ClipboardList },
-          { label: "Bulk Grid", path: "/marks/grid", icon: PencilRuler },
-        ],
-      },
-      {
-        label: "Results",
-        icon: BarChart3,
-        children: [
-          { label: "Reports", path: "/reports", icon: BarChart3 },
-          { label: "Marksheet Print", path: "/results/marksheet", icon: Printer },
-          { label: "Public Portal", path: "/public/portal", icon: Globe },
-        ],
-      },
-      {
-        label: "Account",
-        icon: UserCog,
-        children: [{ label: "Profile", path: "/account/profile", icon: UserCog }],
-      },
-    ],
-    STUDENT: [
-      { label: "Dashboard", path: "/", icon: LayoutDashboard },
-      { label: "My Results", path: "/my-results", icon: BadgeCheck },
-      { label: "Public Portal", path: "/public/portal", icon: Globe },
-      {
-        label: "Account",
-        icon: UserCog,
-        children: [{ label: "Profile", path: "/account/profile", icon: UserCog }],
-      },
-    ],
-    PUBLIC: [{ label: "Public Portal", path: "/public/portal", icon: Globe }],
-    GENERAL_PUBLIC: [{ label: "Public Portal", path: "/public/portal", icon: Globe }],
-  };
-
-  const menuItems = MENUS[role] || MENUS.STUDENT;
+  const menuItems = useMemo(() => getVisibleMenus(me), [me]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!s) return menuItems;
-    const matches = (label) => label.toLowerCase().includes(s);
+    const matches = (label) => String(label || "").toLowerCase().includes(s);
+
     return menuItems
       .map((item) => {
         if (item.children?.length) {
-          const childMatches = item.children.filter((c) => matches(c.label));
+          const childMatches = item.children.filter((child) => matches(child.label));
           if (matches(item.label) || childMatches.length > 0) {
-            return { ...item, children: childMatches.length ? childMatches : item.children };
+            return {
+              ...item,
+              children: childMatches.length ? childMatches : item.children,
+            };
           }
           return null;
         }
@@ -354,43 +277,41 @@ export default function Sidebar({
 
   const header = (
     <div className={cn("px-4 pt-4 transition-all duration-300", isCollapsed && "px-2")}>
-      {/* Product + org header with animation */}
       <div className={cn("flex items-center gap-3 transition-all duration-300", isCollapsed && "justify-center")}>
-        {/* -------------------------------logo disabled here------------------------ */}
-        {/* <div
-          className="rounded-xl border bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center overflow-hidden shadow-sm transition-all duration-300 hover:shadow-md hover:scale-105"
+        <div
+          className="rounded-2xl border border-white/15 bg-white/5 shadow-sm backdrop-blur-md flex items-center justify-center overflow-hidden transition-all duration-300"
           style={{
-            height: Math.max(32, Math.min(64, Number(settings.logo_size) || 44)),
-            width: Math.max(32, Math.min(64, Number(settings.logo_size) || 44)),
+            height: Math.max(42, Math.min(72, Number(settings.logo_size) || 54)),
+            width: Math.max(42, Math.min(72, Number(settings.logo_size) || 54)),
           }}
         >
-          {ORG.logoSrc ? (
-            <img src={ORG.logoSrc} alt="Org Logo" className="h-full w-full object-cover" />
+          {org.logoSrc ? (
+            <img src={org.logoSrc} alt="Campus logo" className="h-full w-full object-cover" />
           ) : (
             <span className="text-sm font-bold text-primary">
               {String(settings.brand_name || "NEB")
                 .split(/\s+/)
                 .slice(0, 2)
-                .map((p) => p[0])
+                .map((part) => part[0])
                 .join("")
                 .toUpperCase()}
             </span>
           )}
-        </div> */}
-
-      {!isCollapsed ? (
-        <div className="min-w-0 animate-fade-in">
-          <div
-            className={cn(
-              "font-bold leading-tight truncate bg-gradient-to-r bg-clip-text text-transparent font-display",
-              sidebarIsDark ? "from-white to-white/70" : "from-foreground to-foreground/70"
-            )}
-          >
-            {settings.brand_name}
-          </div>
-          <div className={cn("text-xs truncate", textMuted)}>{ORG.name}</div>
         </div>
-      ) : null}
+
+        {!isCollapsed ? (
+          <div className="min-w-0 animate-fade-in">
+            <div
+              className={cn(
+                "truncate bg-gradient-to-r bg-clip-text text-transparent font-display text-[1.65rem] font-semibold leading-tight",
+                sidebarIsDark ? "from-white to-white/72" : "from-foreground to-foreground/70"
+              )}
+            >
+              {settings.brand_name}
+            </div>
+            <div className={cn("truncate text-xs font-medium", textMuted)}>{org.name}</div>
+          </div>
+        ) : null}
       </div>
 
       <div className="mt-3 border-b border-border/50 transition-all duration-300" />
@@ -400,7 +321,7 @@ export default function Sidebar({
   return (
     <div
       className={cn(
-        "h-full w-full flex flex-col border-r border-border/50 shadow-lg relative overflow-hidden",
+        "relative flex h-full w-full flex-col overflow-hidden border-r border-border/50 shadow-lg",
         "transition-[opacity,transform] duration-300 ease-in-out",
         isCollapsed ? "w-16" : "w-64",
         sidebarIsDark && "text-white",
@@ -408,27 +329,20 @@ export default function Sidebar({
       )}
       style={{
         backgroundImage:
-          "radial-gradient(120px 120px at 20% 10%, rgba(255,255,255,0.08), transparent 60%), linear-gradient(180deg, hsl(var(--sidebar-strong)) 0%, hsl(var(--sidebar)) 55%, hsl(var(--sidebar-soft)) 100%)",
+          "radial-gradient(120px 120px at 18% 8%, rgba(255,255,255,0.08), transparent 60%), linear-gradient(180deg, hsl(var(--sidebar-strong)) 0%, hsl(var(--sidebar)) 52%, hsl(var(--sidebar-soft)) 100%)",
       }}
     >
-      {/* Subtle pattern overlay */}
-      <div className="absolute inset-0 bg-grid-pattern opacity-[0.06] pointer-events-none" />
-      <div className="absolute -top-24 -right-10 h-40 w-40 rounded-full bg-accent/20 blur-3xl opacity-40 pointer-events-none" />
+      <div className="pointer-events-none absolute inset-0 bg-grid-pattern opacity-[0.06]" />
+      <div className="pointer-events-none absolute -right-10 -top-24 h-40 w-40 rounded-full bg-accent/20 blur-3xl opacity-40" />
 
       {header}
 
-      {/* search - enhanced with icon and focus state */}
-      {!isCollapsed && (
-        <div
-          className={cn(
-            "px-4 py-3 transition-all duration-300",
-            isSearchFocused && "bg-muted/30"
-          )}
-        >
+      {!isCollapsed ? (
+        <div className={cn("px-4 py-3 transition-all duration-300", isSearchFocused && "bg-muted/30")}>
           <div className="relative">
             <Search
               className={cn(
-                "absolute left-4 top-1/2 transform -translate-y-1/2 h-4 w-4 transition-colors duration-200",
+                "absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 transform transition-colors duration-200",
                 sidebarIsDark ? "text-white/50" : "text-muted-foreground",
                 isSearchFocused && "text-accent"
               )}
@@ -440,22 +354,20 @@ export default function Sidebar({
               onBlur={() => setIsSearchFocused(false)}
               placeholder="Search menu..."
               className={cn(
-                "pl-10 rounded-full transition-all duration-200",
+                "rounded-full pl-10 transition-all duration-200",
                 sidebarIsDark &&
-                  "bg-white/10 border-white/10 text-white placeholder:text-white/50 focus-visible:ring-white/30",
+                  "border-white/10 bg-white/10 text-white placeholder:text-white/50 focus-visible:ring-white/30",
                 isSearchFocused && "ring-2 ring-accent/20 shadow-sm"
               )}
             />
           </div>
         </div>
-      )}
+      ) : null}
 
-      {/* nav with enhanced hover effects */}
       <div
         className={cn(
           "flex-1 overflow-y-auto py-3 transition-all duration-300",
-          isCollapsed && "px-1",
-          !isCollapsed && "px-2"
+          isCollapsed ? "px-1" : "px-2"
         )}
       >
         <div className="space-y-1">
@@ -464,9 +376,9 @@ export default function Sidebar({
 
             if (item.children?.length) {
               const childActive = item.children.some(
-                (c) =>
-                  location.pathname === c.path ||
-                  location.pathname.startsWith(c.path + "/")
+                (child) =>
+                  location.pathname === child.path ||
+                  location.pathname.startsWith(`${child.path}/`)
               );
               const isOpen = q ? true : openGroups[item.label] ?? childActive;
 
@@ -481,21 +393,18 @@ export default function Sidebar({
                       }))
                     }
                     className={cn(
-                      "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-200 relative overflow-hidden w-full text-left",
+                      "group relative flex w-full items-center gap-3 overflow-hidden rounded-lg px-3 py-2.5 text-left text-sm transition-all duration-200",
                       itemHover,
                       "hover:translate-x-1 hover:shadow-sm",
                       childActive ? itemActive : textBase,
                       isCollapsed && "justify-center px-2"
                     )}
                     title={item.label}
-                    style={{
-                      animationDelay: `${index * 50}ms`,
-                    }}
+                    style={{ animationDelay: `${index * 50}ms` }}
                   >
-                    {/* Active indicator */}
-                {childActive && (
-                  <div className="absolute left-0 top-1/2 transform -translate-y-1/2 h-6 w-1 bg-accent rounded-r-full" />
-                )}
+                    {childActive ? (
+                      <div className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 transform rounded-r-full bg-accent" />
+                    ) : null}
 
                     <Icon
                       className={cn(
@@ -507,12 +416,7 @@ export default function Sidebar({
 
                     {!isCollapsed ? (
                       <>
-                        <span
-                          className={cn(
-                            "truncate transition-all duration-200",
-                            childActive && "font-medium"
-                          )}
-                        >
+                        <span className={cn("truncate transition-all duration-200", childActive && "font-medium")}>
                           {item.label}
                         </span>
                         <ChevronDown
@@ -523,23 +427,15 @@ export default function Sidebar({
                         />
                       </>
                     ) : null}
-
-                    {/* Hover indicator for collapsed state */}
-                    {isCollapsed && (
-                      <div className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded-md shadow-md opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-200 whitespace-nowrap z-50">
-                        {item.label}
-                        <div className="absolute left-0 top-1/2 transform -translate-y-1/2 -ml-1 w-2 h-2 bg-popover rotate-45" />
-                      </div>
-                    )}
                   </button>
 
-                  {isOpen && (
+                  {isOpen ? (
                     <div className={cn("space-y-1", !isCollapsed && "pl-4")}>
                       {item.children.map((child, childIndex) => {
                         const ChildIcon = child.icon;
                         const active =
                           location.pathname === child.path ||
-                          location.pathname.startsWith(child.path + "/");
+                          location.pathname.startsWith(`${child.path}/`);
 
                         return (
                           <NavLink
@@ -548,7 +444,7 @@ export default function Sidebar({
                             onClick={handleNavigate}
                             className={({ isActive }) =>
                               cn(
-                                "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-200 relative overflow-hidden",
+                                "group relative flex items-center gap-3 overflow-hidden rounded-lg px-3 py-2.5 text-sm transition-all duration-200",
                                 itemHover,
                                 "hover:translate-x-1 hover:shadow-sm",
                                 isActive ? itemActive : textBase,
@@ -556,15 +452,11 @@ export default function Sidebar({
                               )
                             }
                             title={child.label}
-                            style={{
-                              animationDelay: `${(index + childIndex + 1) * 50}ms`,
-                            }}
+                            style={{ animationDelay: `${(index + childIndex + 1) * 50}ms` }}
                           >
-                            {/* Active indicator */}
-                            {active && (
-                              <div className="absolute left-0 top-1/2 transform -translate-y-1/2 h-6 w-1 bg-accent rounded-r-full" />
-                            )}
-
+                            {active ? (
+                              <div className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 transform rounded-r-full bg-accent" />
+                            ) : null}
                             <ChildIcon
                               className={cn(
                                 "h-4 w-4 shrink-0 transition-all duration-200",
@@ -572,37 +464,23 @@ export default function Sidebar({
                                 !active && "group-hover:scale-105"
                               )}
                             />
-
                             {!isCollapsed ? (
-                              <span
-                                className={cn(
-                                  "truncate transition-all duration-200",
-                                  active && "font-medium"
-                                )}
-                              >
+                              <span className={cn("truncate transition-all duration-200", active && "font-medium")}>
                                 {child.label}
                               </span>
                             ) : null}
-
-                            {/* Hover indicator for collapsed state */}
-                            {isCollapsed && (
-                              <div className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded-md shadow-md opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-200 whitespace-nowrap z-50">
-                                {child.label}
-                                <div className="absolute left-0 top-1/2 transform -translate-y-1/2 -ml-1 w-2 h-2 bg-popover rotate-45" />
-                              </div>
-                            )}
                           </NavLink>
                         );
                       })}
                     </div>
-                  )}
+                  ) : null}
                 </div>
               );
             }
 
-            const active =
-              location.pathname === item.path ||
-              location.pathname.startsWith(item.path + "/");
+            const active = item.exact
+              ? location.pathname === item.path
+              : location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
 
             return (
               <NavLink
@@ -611,7 +489,7 @@ export default function Sidebar({
                 onClick={handleNavigate}
                 className={({ isActive }) =>
                   cn(
-                    "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-200 relative overflow-hidden",
+                    "group relative flex items-center gap-3 overflow-hidden rounded-lg px-3 py-2.5 text-sm transition-all duration-200",
                     itemHover,
                     "hover:translate-x-1 hover:shadow-sm",
                     isActive ? itemActive : textBase,
@@ -619,16 +497,12 @@ export default function Sidebar({
                   )
                 }
                 title={item.label}
-                style={{
-                  animationDelay: `${index * 50}ms`,
-                }}
-                end={item.path === "/"}
+                style={{ animationDelay: `${index * 50}ms` }}
+                end={!!item.exact}
               >
-                {/* Active indicator */}
-                {active && (
-                  <div className="absolute left-0 top-1/2 transform -translate-y-1/2 h-6 w-1 bg-accent rounded-r-full" />
-                )}
-
+                {active ? (
+                  <div className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 transform rounded-r-full bg-accent" />
+                ) : null}
                 <Icon
                   className={cn(
                     "h-4 w-4 shrink-0 transition-all duration-200",
@@ -636,73 +510,46 @@ export default function Sidebar({
                     !active && "group-hover:scale-105"
                   )}
                 />
-
                 {!isCollapsed ? (
-                  <span
-                    className={cn(
-                      "truncate transition-all duration-200",
-                      active && "font-medium"
-                    )}
-                  >
+                  <span className={cn("truncate transition-all duration-200", active && "font-medium")}>
                     {item.label}
                   </span>
                 ) : null}
-
-                {/* Hover indicator for collapsed state */}
-                {isCollapsed && (
-                  <div className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded-md shadow-md opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-200 whitespace-nowrap z-50">
-                    {item.label}
-                    <div className="absolute left-0 top-1/2 transform -translate-y-1/2 -ml-1 w-2 h-2 bg-popover rotate-45" />
-                  </div>
-                )}
               </NavLink>
             );
           })}
 
           {filtered.length === 0 ? (
-            <div
-              className={cn(
-                "px-3 py-2 text-xs animate-pulse",
-                textMuted,
-                isCollapsed && "hidden"
-              )}
-            >
+            <div className={cn("px-3 py-2 text-xs", textMuted, isCollapsed && "hidden")}>
               No menu found.
             </div>
           ) : null}
         </div>
       </div>
 
-      {/* footer with enhanced logout button */}
-      <div className={cn("p-3 border-t border-border/50 transition-all duration-300", isCollapsed && "p-2")}>
+      <div className={cn("border-t border-border/50 p-3 transition-all duration-300", isCollapsed && "p-2")}>
         <Button
           variant="default"
           className={cn(
-            "w-full justify-start gap-2 transition-all duration-200 hover:shadow-sm bg-white text-foreground hover:bg-white/90",
+            "w-full justify-start gap-2 bg-white text-slate-900 transition-all duration-200 hover:bg-white/95 hover:shadow-sm",
             sidebarIsDark && "bg-white text-slate-900 hover:bg-white/95",
             isCollapsed && "justify-center"
           )}
           onClick={onLogout}
         >
-          <LogOut className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" />
+          <LogOut className="h-4 w-4" />
           {!isCollapsed ? "Logout" : null}
         </Button>
 
         {!isCollapsed ? (
-          <div className={cn("mt-2 text-[11px] flex items-center gap-1", textMuted)}>
+          <div className={cn("mt-2 flex items-center gap-1 text-[11px]", textMuted)}>
             <span>v1</span>
-            <span
-              className={cn(
-                "inline-block w-1 h-1 rounded-full",
-                sidebarIsDark ? "bg-white/50" : "bg-muted-foreground"
-              )}
-            />
+            <span className={cn("inline-block h-1 w-1 rounded-full", sidebarIsDark ? "bg-white/50" : "bg-muted-foreground")} />
             <span>Local Server</span>
           </div>
         ) : null}
       </div>
 
-      {/* Add custom styles for animations */}
       <style jsx>{`
         @keyframes fade-in {
           from {

@@ -4,6 +4,8 @@ import { toast } from "sonner";
 
 import { api } from "../../lib/api";
 import { useMe } from "../../lib/useMe";
+import { hasPermission } from "../../lib/access";
+import { INVITABLE_ROLE_OPTIONS } from "../../lib/roles";
 
 import { Card, CardContent } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
@@ -44,7 +46,7 @@ export default function InvitesPage() {
   const [result, setResult] = useState(null);
   const [recent, setRecent] = useState([]);
 
-  const canAccess = useMemo(() => me?.role === "SUPER_ADMIN", [me]);
+  const canAccess = useMemo(() => hasPermission(me, "users.invites"), [me]);
 
   const createInvite = useMutation({
     mutationFn: async (payload) => {
@@ -106,7 +108,7 @@ export default function InvitesPage() {
           <CardContent className="p-4">
             <div className="text-lg font-semibold">Access denied</div>
             <div className="text-sm text-muted-foreground mt-1">
-              Only <span className="font-medium">SUPER_ADMIN</span> can create user invites.
+              You do not have permission to create user invites.
             </div>
           </CardContent>
         </Card>
@@ -144,15 +146,11 @@ export default function InvitesPage() {
                   value={role}
                   onChange={(e) => setRole(e.target.value)}
                 >
-                  <option value="ADMIN">ADMIN</option>
-                  <option value="FINANCE">FINANCE</option>
-                  <option value="TEACHER">TEACHER</option>
-                  <option value="EXAM_HEAD">EXAM_HEAD (Exam Head)</option>
-                  <option value="CAMPUS_CHIEF">CAMPUS_CHIEF (Campus Chief)</option>
-                  <option value="ASSISTANT_CAMPUS_CHIEF">
-                    ASSISTANT_CAMPUS_CHIEF (Asst Campus Chief)
-                  </option>
-                  <option value="STUDENT">STUDENT</option>
+                  {INVITABLE_ROLE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>

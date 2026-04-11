@@ -26,6 +26,7 @@ import SubjectCodesPage from "../modules/academics/SubjectCodesPage";
 import InvitesPage from "../pages/admin/InvitesPage";
 import AddUserPage from "../pages/admin/AddUserPage";
 import UsersPage from "../pages/admin/UsersPage";
+import RolesAccessPage from "../pages/admin/RolesAccessPage";
 import PublicResultsPage from "../pages/public/PublicResultsPage";
 import PublicPortalAccessPage from "../pages/public/PublicPortalAccessPage";
 import MyResultsPage from "../pages/student/MyResultsPage";
@@ -38,6 +39,7 @@ import MarksheetPrintPage from "../pages/results/MarksheetPrintPage";
 import OtClaimsPage from "../modules/operations/OtClaimsPage";
 import OtPolicyPage from "../modules/operations/OtPolicyPage";
 import OtReportsPage from "../modules/operations/OtReportsPage";
+import ExamSeatPlannerPage from "../modules/exams/ExamSeatPlannerPage";
 
 export default function AppRouter() {
   return (
@@ -80,6 +82,7 @@ export default function AppRouter() {
         <Route path="exams" element={<ExamWorkflowPage />} />
         <Route path="exams/workflow" element={<ExamWorkflowPage />} />
         <Route path="exams/manage" element={<ExamsPage />} />
+        <Route path="exams/seat-planner" element={<ExamSeatPlannerPage />} />
         <Route path="exams/:examId/components" element={<ExamComponentsPage />} />
 
         {/* Marks */}
@@ -91,6 +94,7 @@ export default function AppRouter() {
         <Route path="admin/invites" element={<InvitesPage />} />
         <Route path="admin/users/new" element={<AddUserPage />} />
         <Route path="admin/users" element={<UsersPage />} />
+        <Route path="admin/roles" element={<RolesAccessPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="account/profile" element={<ProfilePage />} />
 

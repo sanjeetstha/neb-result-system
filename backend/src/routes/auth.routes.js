@@ -16,10 +16,11 @@
 
 const router = require("express").Router();
 const authController = require("../controllers/auth.controller");
+const { requireAuth, requirePermission } = require("../middlewares/auth");
 
 router.post("/bootstrap-super-admin", authController.bootstrapSuperAdmin);
 router.post("/login", authController.login);
-router.post("/create-user", authController.createUser);
+router.post("/create-user", requireAuth, requirePermission("users.add"), authController.createUser);
 router.post("/forgot-password", authController.forgotPassword);
 router.post("/reset-password", authController.resetPassword);
 

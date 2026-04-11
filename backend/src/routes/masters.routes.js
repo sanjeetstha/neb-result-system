@@ -1,116 +1,73 @@
 const router = require("express").Router();
-const { requireAuth, requireRole } = require("../middlewares/auth");
+const { requireAuth, requirePermission } = require("../middlewares/auth");
 const {
-  listCampuses, createCampus,
-  updateCampus, deleteCampus,
-  listAcademicYears, createAcademicYear,
+  listCampuses,
+  createCampus,
+  updateCampus,
+  deleteCampus,
+  listAcademicYears,
+  createAcademicYear,
   updateAcademicYear,
-  listFaculties, createFaculty,
+  listFaculties,
+  createFaculty,
   updateFaculty,
   listClasses,
   listGradingSchemes,
-  listBatches, createBatch,
-  updateBatch, deleteBatch,
-  listSections, createSection,
+  listBatches,
+  createBatch,
+  updateBatch,
+  deleteBatch,
+  listSections,
+  createSection,
   updateSection,
-  getSubjectCatalog, shiftOptionalSubjectGroup, getSubjectById
+  getSubjectCatalog,
+  shiftOptionalSubjectGroup,
+  getSubjectById,
 } = require("../controllers/masters.controller");
 
-// Campuses
-router.get("/campuses", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), listCampuses);
-router.post("/campuses", requireAuth, requireRole("SUPER_ADMIN"), createCampus);
-router.put("/campuses/:id", requireAuth, requireRole("SUPER_ADMIN"), updateCampus);
-router.delete("/campuses/:id", requireAuth, requireRole("SUPER_ADMIN"), deleteCampus);
+router.get("/campuses", requireAuth, requirePermission("college.manage"), listCampuses);
+router.post("/campuses", requireAuth, requirePermission("college.manage"), createCampus);
+router.put("/campuses/:id", requireAuth, requirePermission("college.manage"), updateCampus);
+router.delete("/campuses/:id", requireAuth, requirePermission("college.manage"), deleteCampus);
 
-// Academic years
-router.get("/academic-years", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), listAcademicYears);
-router.post("/academic-years", requireAuth, requireRole("SUPER_ADMIN"), createAcademicYear);
-router.put("/academic-years/:id", requireAuth, requireRole("SUPER_ADMIN"), updateAcademicYear);
+router.get("/academic-years", requireAuth, requirePermission("college.manage"), listAcademicYears);
+router.post("/academic-years", requireAuth, requirePermission("college.manage"), createAcademicYear);
+router.put("/academic-years/:id", requireAuth, requirePermission("college.manage"), updateAcademicYear);
 
-// Faculties
-router.get("/faculties", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), listFaculties);
-router.post("/faculties", requireAuth, requireRole("SUPER_ADMIN"), createFaculty);
-router.put("/faculties/:id", requireAuth, requireRole("SUPER_ADMIN"), updateFaculty);
+router.get("/faculties", requireAuth, requirePermission("college.manage"), listFaculties);
+router.post("/faculties", requireAuth, requirePermission("college.manage"), createFaculty);
+router.put("/faculties/:id", requireAuth, requirePermission("college.manage"), updateFaculty);
 
-// Classes
 router.get(
   "/classes",
   requireAuth,
-  requireRole(
-    "SUPER_ADMIN",
-    "ADMIN",
-    "EXAM_HEAD",
-    "CAMPUS_CHIEF",
-    "ASSISTANT_CAMPUS_CHIEF"
-  ),
+  requirePermission("college.manage", "academics.view", "exams.view", "marks.view", "seat_planner.manage"),
   listClasses
 );
 
-// Grading schemes
 router.get(
   "/grading-schemes",
   requireAuth,
-  requireRole(
-    "SUPER_ADMIN",
-    "ADMIN",
-    "TEACHER",
-    "EXAM_HEAD",
-    "CAMPUS_CHIEF",
-    "ASSISTANT_CAMPUS_CHIEF"
-  ),
+  requirePermission("college.manage", "academics.view", "exams.view", "marks.view", "seat_planner.manage"),
   listGradingSchemes
 );
 
-// Batches
 router.get(
   "/batches",
   requireAuth,
-  requireRole(
-    "SUPER_ADMIN",
-    "ADMIN",
-    "TEACHER",
-    "EXAM_HEAD",
-    "CAMPUS_CHIEF",
-    "ASSISTANT_CAMPUS_CHIEF"
-  ),
+  requirePermission("college.manage", "academics.view", "exams.view", "marks.view", "students.view", "seat_planner.manage"),
   listBatches
 );
-router.post("/batches", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), createBatch);
-router.put("/batches/:id", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), updateBatch);
-router.delete("/batches/:id", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), deleteBatch);
+router.post("/batches", requireAuth, requirePermission("college.manage"), createBatch);
+router.put("/batches/:id", requireAuth, requirePermission("college.manage"), updateBatch);
+router.delete("/batches/:id", requireAuth, requirePermission("college.manage"), deleteBatch);
 
-// Sections
-router.get("/sections", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), listSections);
-router.post("/sections", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), createSection);
-router.put("/sections/:id", requireAuth, requireRole("SUPER_ADMIN", "ADMIN"), updateSection);
+router.get("/sections", requireAuth, requirePermission("college.manage"), listSections);
+router.post("/sections", requireAuth, requirePermission("college.manage"), createSection);
+router.put("/sections/:id", requireAuth, requirePermission("college.manage"), updateSection);
 
-router.get(
-  "/subject-catalog",
-  requireAuth,
-  requireRole(
-    "SUPER_ADMIN",
-    "ADMIN",
-    "TEACHER",
-    "EXAM_HEAD",
-    "CAMPUS_CHIEF",
-    "ASSISTANT_CAMPUS_CHIEF"
-  ),
-  getSubjectCatalog
-);
-router.post("/subject-codes/shift", requireAuth, requireRole("SUPER_ADMIN"), shiftOptionalSubjectGroup);
-router.get(
-  "/subjects/:id",
-  requireAuth,
-  requireRole(
-    "SUPER_ADMIN",
-    "ADMIN",
-    "TEACHER",
-    "EXAM_HEAD",
-    "CAMPUS_CHIEF",
-    "ASSISTANT_CAMPUS_CHIEF"
-  ),
-  getSubjectById
-);
-
+router.get("/subject-catalog", requireAuth, requirePermission("academics.view"), getSubjectCatalog);
+router.post("/subject-codes/shift", requireAuth, requirePermission("academics.manage"), shiftOptionalSubjectGroup);
+router.get("/subjects/:id", requireAuth, requirePermission("academics.view"), getSubjectById);
 
 module.exports = router;

@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
+import { hasPermission } from "../../lib/access";
 import { usePagination } from "../../lib/usePagination";
 import { useMe } from "../../lib/useMe";
 import { Trash2, Trash, Plus, Layers, FolderPlus } from "lucide-react";
@@ -180,6 +181,7 @@ export default function StudentsPage() {
   const qc = useQueryClient();
   const meQ = useMe();
   const me = meQ.data;
+  const canManageStudents = hasPermission(me, "students.manage");
 
   const [batchId, setBatchId] = useState("");
   const [classId, setClassId] = useState("");
@@ -746,7 +748,7 @@ export default function StudentsPage() {
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-2">
-              {(me?.role === "SUPER_ADMIN" || me?.role === "ADMIN") ? (
+              {canManageStudents ? (
                 <>
                   <div className="relative group">
                     <Button
@@ -814,7 +816,7 @@ export default function StudentsPage() {
                   </div>
                 </>
               ) : null}
-              {me?.role === "SUPER_ADMIN" || me?.role === "ADMIN" ? (
+              {canManageStudents ? (
                 <>
                   <div className="relative group">
                     <Button
@@ -1038,7 +1040,7 @@ export default function StudentsPage() {
                         >
                           Profile
                         </Button>
-                        {(me?.role === "SUPER_ADMIN" || me?.role === "ADMIN") ? (
+                        {canManageStudents ? (
                           <Button
                             size="sm"
                             variant="ghost"

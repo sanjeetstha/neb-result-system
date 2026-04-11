@@ -18,9 +18,11 @@ const publicRoutes = require("./routes/public.routes");
 const exportRoutes = require("./routes/export.routes");
 const inviteRoutes = require("./routes/invites.routes");
 const usersRoutes = require("./routes/users.routes");
+const rolesRoutes = require("./routes/roles.routes");
 const smsRoutes = require("./routes/sms.routes");
 const notificationsRoutes = require("./routes/notifications.routes");
 const otRoutes = require("./routes/ot.routes");
+const seatPlansRoutes = require("./routes/seat-plans.routes");
 
 app.use(helmet());
 app.use(cors());
@@ -57,9 +59,11 @@ app.use("/api/exports", exportRoutes);
 app.use("/api/export", exportRoutes);
 app.use("/api/invites", inviteRoutes);
 app.use("/api/users", usersRoutes);
+app.use("/api/roles", rolesRoutes);
 app.use("/api/sms", smsRoutes);
 app.use("/api/notifications", notificationsRoutes);
 app.use("/api/ot", otRoutes);
+app.use("/api/seat-plans", seatPlansRoutes);
 
 
 app.get("/api/health", async (req, res) => {

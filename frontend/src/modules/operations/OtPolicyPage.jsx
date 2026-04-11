@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { api } from "../../lib/api";
+import { hasPermission } from "../../lib/access";
 import { useMe } from "../../lib/useMe";
 import { todayLocalIsoDate } from "../../lib/date";
 import { Button } from "../../components/ui/button";
@@ -16,8 +17,7 @@ function readErr(err, fallback) {
 export default function OtPolicyPage() {
   const qc = useQueryClient();
   const meQ = useMe();
-  const role = String(meQ.data?.role || "").toUpperCase();
-  const canManage = ["SUPER_ADMIN", "ADMIN"].includes(role);
+  const canManage = hasPermission(meQ.data, "ot.policy.manage");
 
   const policyQ = useQuery({
     queryKey: ["ot", "policy", "active"],

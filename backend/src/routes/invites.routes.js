@@ -1,10 +1,9 @@
 const router = require("express").Router();
 const invites = require("../controllers/invites.controller");
-const { requireAuth, requireRole } = require("../middlewares/auth");
+const { requireAuth, requirePermission } = require("../middlewares/auth");
 
-// SUPER_ADMIN only
-router.post("/", requireAuth, requireRole("SUPER_ADMIN"), invites.createInvite);
-router.get("/", requireAuth, requireRole("SUPER_ADMIN"), invites.listInvites);
-router.post("/:id/revoke", requireAuth, requireRole("SUPER_ADMIN"), invites.revokeInvite);
+router.post("/", requireAuth, requirePermission("users.invites"), invites.createInvite);
+router.get("/", requireAuth, requirePermission("users.invites"), invites.listInvites);
+router.post("/:id/revoke", requireAuth, requirePermission("users.invites"), invites.revokeInvite);
 
 module.exports = router;

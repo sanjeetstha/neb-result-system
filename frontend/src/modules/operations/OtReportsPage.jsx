@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { BarChart3, Download, Filter, Users, WalletCards, Clock3, FileSearch } from "lucide-react";
 
 import { api } from "../../lib/api";
+import { hasPermission } from "../../lib/access";
 import { useMe } from "../../lib/useMe";
 import { todayLocalIsoDate } from "../../lib/date";
 import { Button } from "../../components/ui/button";
@@ -162,8 +163,7 @@ export default function OtReportsPage() {
   const nav = useNavigate();
   const meQ = useMe();
   const me = meQ.data || null;
-  const role = String(me?.role || "").toUpperCase();
-  const canAccess = ["SUPER_ADMIN", "ADMIN", "FINANCE", "CAMPUS_CHIEF"].includes(role);
+  const canAccess = hasPermission(me, "ot.reports");
 
   const [status, setStatus] = useState("ALL");
   const [staffUserId, setStaffUserId] = useState("");

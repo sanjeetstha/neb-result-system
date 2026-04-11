@@ -1,5 +1,5 @@
 const router = require("express").Router();
-const { requireAuth, requireRole } = require("../middlewares/auth");
+const { requireAuth, requirePermission } = require("../middlewares/auth");
 const {
   listUsers,
   listActiveUsers,
@@ -9,11 +9,11 @@ const {
   deleteUser,
 } = require("../controllers/users.controller");
 
-router.get("/", requireAuth, requireRole("SUPER_ADMIN"), listUsers);
-router.get("/active", requireAuth, requireRole("SUPER_ADMIN"), listActiveUsers);
-router.put("/:id/status", requireAuth, requireRole("SUPER_ADMIN"), updateUserStatus);
-router.put("/:id", requireAuth, requireRole("SUPER_ADMIN"), updateUser);
-router.put("/:id/password", requireAuth, requireRole("SUPER_ADMIN"), updateUserPassword);
-router.delete("/:id", requireAuth, requireRole("SUPER_ADMIN"), deleteUser);
+router.get("/", requireAuth, requirePermission("users.manage"), listUsers);
+router.get("/active", requireAuth, requirePermission("users.manage"), listActiveUsers);
+router.put("/:id/status", requireAuth, requirePermission("users.manage"), updateUserStatus);
+router.put("/:id", requireAuth, requirePermission("users.manage"), updateUser);
+router.put("/:id/password", requireAuth, requirePermission("users.manage"), updateUserPassword);
+router.delete("/:id", requireAuth, requirePermission("users.manage"), deleteUser);
 
 module.exports = router;

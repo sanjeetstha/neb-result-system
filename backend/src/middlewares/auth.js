@@ -1,4 +1,5 @@
 const { verifyJwt } = require("../utils/jwt");
+const { hasAnyPermission } = require("../services/rbac.service");
 
 const INTERNAL_ROLES = new Set([
   "SUPER_ADMIN",
@@ -58,6 +59,24 @@ function requireRole(...roles) {
   };
 }
 
+
+function requirePermission(...permissionKeys) {
+  return async (req, res, next) => {
+    try {
+      if (!req.user?.role) {
+        return res.status(403).json({ ok: false, message: "No role" });
+      }
+      const allowed = await hasAnyPermission(req.user.role, permissionKeys);
+      if (!allowed) {
+        return res.status(403).json({ ok: false, message: "Forbidden" });
+      }
+      return next();
+    } catch (e) {
+      return res.status(500).json({ ok: false, message: "Permission check failed" });
+    }
+  };
+}
+
 function requirePublicPortalAccess(req, res, next) {
   const token = extractBearerToken(req);
   if (!token) {
@@ -76,4 +95,4 @@ function requirePublicPortalAccess(req, res, next) {
   }
 }
 
-module.exports = { requireAuth, requireRole, requirePublicPortalAccess };
+module.exports = { requireAuth, requireRole, requirePermission, requirePublicPortalAccess };

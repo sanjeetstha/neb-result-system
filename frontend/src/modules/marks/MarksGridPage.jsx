@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { api } from "../../lib/api";
+import { hasPermission } from "../../lib/access";
 import { useMe } from "../../lib/useMe";
 import { usePagination } from "../../lib/usePagination";
 import { Button } from "../../components/ui/button";
@@ -126,12 +127,12 @@ export default function MarksGridPage() {
   const [previewStudent, setPreviewStudent] = useState(null);
   const [previewData, setPreviewData] = useState(null);
   const [previewError, setPreviewError] = useState("");
-  const canEditMarks = ["SUPER_ADMIN", "ADMIN", "TEACHER"].includes(me?.role);
-  const canGenerateSnapshots = ["SUPER_ADMIN", "ADMIN"].includes(me?.role);
-  const canSubmit = ["SUPER_ADMIN", "ADMIN", "TEACHER"].includes(me?.role);
-  const canVerify = ["SUPER_ADMIN", "EXAM_HEAD"].includes(me?.role);
-  const canApprove = ["SUPER_ADMIN", "CAMPUS_CHIEF", "ASSISTANT_CAMPUS_CHIEF"].includes(me?.role);
-  const canPublish = ["SUPER_ADMIN", "ADMIN"].includes(me?.role);
+  const canEditMarks = hasPermission(me, "marks.entry");
+  const canGenerateSnapshots = hasPermission(me, "results.manage");
+  const canSubmit = hasPermission(me, "results.manage") || hasPermission(me, "marks.entry");
+  const canVerify = hasPermission(me, "results.verify");
+  const canApprove = hasPermission(me, "results.approve");
+  const canPublish = hasPermission(me, "results.publish");
 
   const importErrors = useMemo(() => {
     const arr = importSummary?.errors;

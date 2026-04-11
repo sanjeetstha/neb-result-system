@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Link } from "react-router-dom";
 
 import { api } from "../../lib/api";
+import { hasPermission } from "../../lib/access";
 import { useMe } from "../../lib/useMe";
 import {
   EXAM_PRESETS,
@@ -55,6 +56,10 @@ export default function ExamWorkflowPage() {
   const qc = useQueryClient();
   const meQ = useMe();
   const me = meQ.data;
+  const canManageExams = hasPermission(me, "exams.manage");
+  const canManageResults = hasPermission(me, "results.manage");
+  const canPublishResults = hasPermission(me, "results.publish");
+  const canSeatPlan = hasPermission(me, "seat_planner.manage");
 
   const [examId, setExamId] = useState("");
   const [batchId, setBatchId] = useState("");
@@ -509,7 +514,7 @@ export default function ExamWorkflowPage() {
             </div>
           </div>
 
-          {examId && (me?.role === "SUPER_ADMIN" || me?.role === "ADMIN") ? (
+          {examId && canManageExams ? (
             <div className="flex items-center gap-2">
               <Button
                 variant="destructive"
@@ -714,9 +719,16 @@ export default function ExamWorkflowPage() {
               }}
               placeholder="Exam name (e.g., Pre-Board 2082)"
             />
-            <Button onClick={() => createExam.mutate()} disabled={createExam.isPending}>
-              {createExam.isPending ? "Creating..." : "Create Exam"}
-            </Button>
+            <div className="flex flex-wrap justify-end gap-2">
+              {canSeatPlan ? (
+                <Button asChild variant="outline">
+                  <Link to="/exams/seat-planner">Open Seat Planner</Link>
+                </Button>
+              ) : null}
+              <Button onClick={() => createExam.mutate()} disabled={!canManageExams || createExam.isPending}>
+                {createExam.isPending ? "Creating..." : "Create Exam"}
+              </Button>
+            </div>
           </div>
 
           {!academicYearId && batchId ? (
@@ -839,7 +851,7 @@ export default function ExamWorkflowPage() {
             ) : null}
           </div>
 
-          <Button onClick={generateAll} disabled={!examId || generatingAll || isPublished}>
+          <Button onClick={generateAll} disabled={!canManageResults || !examId || generatingAll || isPublished}>
             {generatingAll ? "Generating..." : "Generate All"}
           </Button>
         </CardContent>
@@ -857,11 +869,11 @@ export default function ExamWorkflowPage() {
             <Button
               variant="secondary"
               onClick={() => publishMutation.mutate()}
-              disabled={!examId || publishMutation.isPending || isPublished}
+              disabled={!canPublishResults || !examId || publishMutation.isPending || isPublished}
             >
               {publishMutation.isPending ? "Publishing..." : "Publish Exam"}
             </Button>
-            {me?.role === "SUPER_ADMIN" ? (
+            {canPublishResults ? (
               <Button
                 variant="outline"
                 onClick={() => {

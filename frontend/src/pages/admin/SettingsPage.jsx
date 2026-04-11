@@ -6,6 +6,8 @@ import {
   saveAppSettings,
   resetAppSettings,
 } from "../../lib/appSettings";
+import { hasPermission } from "../../lib/access";
+import { useMe } from "../../lib/useMe";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
@@ -117,8 +119,10 @@ function Toggle({ checked, onChange, label }) {
 }
 
 export default function SettingsPage() {
+  const { data: me, isLoading: meLoading } = useMe();
   const [form, setForm] = useState(() => getAppSettings());
   const [dirty, setDirty] = useState(false);
+  const canAccess = hasPermission(me, "settings.manage");
 
   useEffect(() => {
     setForm(getAppSettings());
@@ -144,6 +148,23 @@ export default function SettingsPage() {
   };
 
   const logoPreview = useMemo(() => form.logo_data_url || "", [form.logo_data_url]);
+
+  if (meLoading) {
+    return <div className="text-sm text-muted-foreground">Loading settings...</div>;
+  }
+
+  if (!canAccess) {
+    return (
+      <Card className="max-w-2xl">
+        <CardContent className="p-4">
+          <div className="text-lg font-semibold">Access denied</div>
+          <div className="mt-1 text-sm text-muted-foreground">
+            You do not have permission to manage app settings.
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-4">

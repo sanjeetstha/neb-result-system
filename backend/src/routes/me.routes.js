@@ -2,6 +2,7 @@ const router = require("express").Router();
 const { requireAuth } = require("../middlewares/auth");
 const db = require("../db");
 const { hashPassword, verifyPassword } = require("../utils/crypto");
+const { getRolePermissionKeys } = require("../services/rbac.service");
 
 async function loadUser(uid) {
   const [[row]] = await db.query(
@@ -20,6 +21,7 @@ async function loadUser(uid) {
     role: row.role,
     is_active: row.is_active,
     last_login_at: row.last_login_at,
+    permissions: await getRolePermissionKeys(row.role),
   };
 }
 

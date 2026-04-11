@@ -24,6 +24,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 
 import { api } from "../../lib/api";
+import { hasAnyPermission, hasPermission } from "../../lib/access";
 import { toggleTheme, getTheme } from "../../lib/theme";
 import { useAppSettings } from "../../lib/appSettings";
 import { useProfileSettings } from "../../lib/profileSettings";
@@ -59,17 +60,13 @@ export default function Topbar({ me, onOpenSidebar, onToggleCollapse, collapsed,
   const settings = useAppSettings();
   const profile = useProfileSettings(me);
   const avatarSrc = profile?.avatar_data_url || "";
-  const canManageApp = ["SUPER_ADMIN", "ADMIN"].includes(me?.role);
-  const canQuickActions = [
-    "SUPER_ADMIN",
-    "ADMIN",
-    "FINANCE",
-    "TEACHER",
-    "EXAM_HEAD",
-    "CAMPUS_CHIEF",
-    "ASSISTANT_CAMPUS_CHIEF",
-  ].includes(me?.role);
-  const isSuperAdmin = me?.role === "SUPER_ADMIN";
+  const canManageApp = hasPermission(me, "settings.manage");
+  const canQuickActions = hasAnyPermission(me, [
+    "exams.manage",
+    "marks.bulk",
+    "reports.view",
+  ]);
+  const isSuperAdmin = hasPermission(me, "roles.manage");
   const isActive = me?.is_active !== false;
   const topbarTitle =
     String(settings.topbar_title_np || "").trim() || "Campus Operations Management System";
